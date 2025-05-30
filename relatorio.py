@@ -6,7 +6,7 @@ import re
 import os
 import subprocess
 import sys
-import logging # Mantido, embora não configurado para output no exemplo
+import logging 
 
 # Tentar importar openpyxl e seus componentes necessários
 try:
@@ -40,35 +40,44 @@ def extract_uc_from_block(text_block):
 
 def extract_valor_total_fatura_from_block(text_block):
     """Extrai o valor total da fatura (que será o Valor Líquido) do bloco de texto."""
-    # Tenta o padrão mais específico primeiro
-    match = re.search(r"Grupo / Subgrupo Tensão:.*?Valor:\s*R\$\s*([\d\.,]+)", text_block, re.DOTALL | re.IGNORECASE)
+    # Tenta o padrão mais específico primeiro (Valor no resumo da fatura individual)
+    # Busca pela linha que começa com "Valor:" ou "Valor:" seguida por R$ e o valor
+    # re.DOTALL | re.IGNORECASE permite que . casem com quebras de linha e ignora maiúsculas/minúsculas
+    match = re.search(r"Valor:\s*R\$\s*([\d\.,]+)", text_block, re.DOTALL | re.IGNORECASE)
     if match:
         return parse_value(match.group(1))
-    # Fallback para um padrão mais genérico se o específico não for encontrado
-    match_fallback = re.search(r"TOTAL A PAGAR\s*R\$\s*([\d\.,]+)", text_block, re.IGNORECASE)
-    if match_fallback:
-        return parse_value(match_fallback.group(1))
-    # Outro fallback comum
-    match_fallback_2 = re.search(r"Valor:\s*R\$\s*([\d\.,]+)", text_block, re.IGNORECASE)
-    if match_fallback_2:
-        return parse_value(match_fallback_2.group(1))
+
+    # Fallback para o padrão "TOTAL A PAGAR" (comum na primeira página ou rodapé)
+    match_fallback_total = re.search(r"TOTAL A PAGAR\s*R\$\s*([\d\.,]+)", text_block, re.IGNORECASE)
+    if match_fallback_total:
+        return parse_value(match_fallback_total.group(1))
+
     return 0.0
 
 def extract_item_value_from_block(text_block, item_name_pattern):
     """
     Extrai o valor da coluna 'Valor (R$)' para um item específico da seção 'Itens da Fatura'.
-    Funciona mesmo que tenha espaçamentos irregulares ou colunas faltantes antes do valor.
+    Modificado para pegar o valor na 3ª coluna numérica após o nome do item,
+    para lidar com o layout específico dos 'Tributos Retidos'.
     """
-    # Normaliza múltiplos espaços para um único espaço, facilitando a regex.
-    # Isso ajuda a lidar com desalinhamentos e OCRs imperfeitos.
-    cleaned_text_block = re.sub(r'\s+', ' ', text_block)
+    if not text_block or not isinstance(text_block, str):
+        return 0.0
 
-    # A regex busca o 'item_name_pattern', seguido por quaisquer caracteres (.*?) não gananciosos,
-    # e então captura um número que pode ser negativo (o sinal '-' é opcional)
-    # e pode conter pontos ou vírgulas, que está no final da linha ($).
-    # re.escape() é usado para garantir que 'item_name_pattern' seja tratado como uma string literal,
-    # caso contenha caracteres especiais de regex.
-    pattern = rf"{re.escape(item_name_pattern)}.*?(-?[\d\.,]+)\s*$" # Adicionado \s*$ para lidar com espaços no final da linha
+    # Normaliza múltiplos espaços para um único espaço e remove espaços no início/fim das linhas
+    cleaned_text_block = "\n".join(line.strip() for line in text_block.splitlines() if line.strip())
+    cleaned_text_block = re.sub(r'[ \t]+', ' ', cleaned_text_block)
+
+
+    # --- Nova Regex para itens de Tributos Retidos com colunas extras ---
+    # Procura pelo item, pula 2 sequências de valores numéricos, e captura a 3ª.
+    # Ex: Nome do Item | Quantidade | Preço Unitário | Valor (R$) | Outras Colunas
+    # Re.escape() para tratar caracteres especiais no nome do item.
+    # .*? para casar qualquer coisa não gananciosa (como espaços)
+    # \s+[\d\.,]+ para casar um ou mais espaços e uma sequência numérica (ponto/vírgula inclusos)
+    # Repetimos \s+[\d\.,]+ para pular as duas primeiras colunas numéricas.
+    # (-?[\d\.,]+) para capturar o valor que pode ser negativo.
+    pattern = rf"{re.escape(item_name_pattern)}.*?\s+[\d\.,]+.*?\s+[\d\.,]+.*?\s+(-?[\d\.,]+)"
+
 
     match = re.search(pattern, cleaned_text_block, re.MULTILINE | re.IGNORECASE)
 
@@ -78,16 +87,14 @@ def extract_item_value_from_block(text_block, item_name_pattern):
     return 0.0
 
 
-def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_error_logging, logger_func=None):
+def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_error_logging, logger_func):
     """
     Extrai todos os dados de uma fatura a partir de um bloco de texto.
     Retorna um dicionário com os dados ou um dicionário de erro.
     """
     uc_number = extract_uc_from_block(text_block)
     if not uc_number:
-        # Se não há UC no bloco, não podemos prosseguir com este bloco específico.
-        # Isso pode acontecer se o bloco de texto for parte de uma página sem uma fatura completa.
-        return None 
+        return None
 
     base_info = df_base[df_base['UC'].astype(str) == uc_number]
     if base_info.empty:
@@ -99,12 +106,10 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
     cod_reg = base_info['Cod de Reg'].iloc[0]
     nome_base = base_info['Nome'].iloc[0]
 
-    # Este é o Valor Líquido da Fatura, conforme extraído do cabeçalho/rodapé da fatura.
     valor_liquido_fatura = extract_valor_total_fatura_from_block(text_block)
     if valor_liquido_fatura == 0.0 and logger_func:
-        logger_func(f"AVISO: Valor Líquido da fatura (Valor Total da Fatura) não encontrado ou zerado para UC {uc_number} em {pdf_filename_for_error_logging}. Verifique o PDF.", "WARNING")
+         logger_func(f"AVISO: Valor Líquido da fatura (Valor Total da Fatura) não encontrado ou zerado para UC {uc_number} em {pdf_filename_for_error_logging}. Verifique o PDF ou o padrão de extração.", "WARNING")
 
-    # Padrões para os tributos retidos na seção "Itens da Fatura"
     tributos_retidos_patterns = {
         "IRPJ": r"Tributo Retido IRPJ",
         "PIS": r"Tributo Retido PIS",
@@ -113,30 +118,20 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
     }
 
     soma_valores_negativos_tributos = 0.0
-    # Dicionário para armazenar valores individuais dos tributos (opcional, para debug ou uso futuro)
-    # valores_tributos_extraidos = {}
+    found_any_tax_value_non_zero = False
 
     for nome_tributo, pattern_str in tributos_retidos_patterns.items():
-        # extract_item_value_from_block deve retornar o valor da coluna "Valor (R$)"
-        # para esses itens, que é esperado ser negativo.
         valor_tributo = extract_item_value_from_block(text_block, pattern_str)
-        # valores_tributos_extraidos[nome_tributo] = valor_tributo
-        soma_valores_negativos_tributos += valor_tributo # Acumula os valores (negativos)
+        soma_valores_negativos_tributos += valor_tributo
+        if valor_tributo != 0.0:
+            found_any_tax_value_non_zero = True
 
-    # O "Desconto de Tributos Retidos (R$)" é a soma dos valores absolutos dos tributos,
-    # ou seja, o oposto da soma dos valores negativos.
     desconto_total_tributos_retidos = abs(soma_valores_negativos_tributos)
-
-    # Valor Bruto (R$) = Valor Líquido (R$) + Desconto de Tributos Retidos (R$)
-    valor_bruto_fatura_calculado = valor_liquido_fatura + desconto_total_tributos_retidos
     
-    # Log se o desconto for zero, pode indicar que os itens não foram encontrados
-    if desconto_total_tributos_retidos == 0.0 and soma_valores_negativos_tributos == 0.0 and logger_func:
-        # Verifica se algum valor de tributo foi encontrado como não zero, caso contrário pode ser um falso aviso
-        found_any_tax_value_non_zero = any(extract_item_value_from_block(text_block, p) != 0.0 for p in tributos_retidos_patterns.values())
-        if not found_any_tax_value_non_zero:
-             logger_func(f"INFO: Nenhum valor de tributo retido encontrado para UC {uc_number} em {pdf_filename_for_error_logging}. 'Desconto de Tributos Retidos' será 0.00.", "INFO")
+    if desconto_total_tributos_retidos == 0.0 and not found_any_tax_value_non_zero and logger_func:
+         logger_func(f"INFO: Nenhum item de tributo retido ('Tributo Retido IRPJ/PIS/COFINS/CSLL') encontrado ou extraído com valor não zero para UC {uc_number} em {pdf_filename_for_error_logging}. 'Desconto de Tributos Retidos' será 0.00.", "INFO")
 
+    valor_bruto_fatura_calculado = valor_liquido_fatura + desconto_total_tributos_retidos
 
     return {
         "UC": uc_number,
@@ -165,51 +160,37 @@ def process_pdf_file(pdf_path, df_base, logger_func):
                 return results_for_this_pdf
 
             for page_num, page in enumerate(pdf.pages):
-                page_text = page.extract_text(x_tolerance=1, y_tolerance=3) # Tolerâncias podem ajudar na extração
+                page_text = page.extract_text(x_tolerance=2, y_tolerance=3)
                 if not page_text or not page_text.strip():
                     logger_func(f"Página {page_num + 1} de {pdf_filename} não contém texto extraível.", "INFO")
                     continue
 
-                # Tenta encontrar blocos de fatura baseados na presença de "UC:" ou "Unidade Consumidora:"
-                # Isso ajuda a processar PDFs com múltiplas faturas por página.
                 uc_pattern = r"(?:UC:|Unidade Consumidora:)\s*\d+"
                 matches = list(re.finditer(uc_pattern, page_text))
 
                 if not matches:
-                    # Se nenhuma UC explícita for encontrada na página, pode ser uma fatura que ocupa a página inteira
-                    # ou uma página sem dados de fatura. Tenta processar a página inteira como um bloco.
-                    logger_func(f"Nenhuma UC explícita na página {page_num+1} de {pdf_filename}. Tentando processar a página inteira como um bloco único.", "INFO")
-                    fatura_data = extract_fatura_data_from_text_block(page_text, df_base, pdf_filename, logger_func)
-                    if fatura_data and "error" not in fatura_data : # Adiciona apenas se dados válidos forem extraídos
-                        results_for_this_pdf.append(fatura_data)
-                    elif fatura_data and "error" in fatura_data: # Adiciona se for um erro conhecido
-                        results_for_this_pdf.append(fatura_data)
-                    # Se fatura_data for None (sem UC no bloco), não adiciona nada e continua.
-                    continue
+                    if page_num == 0:
+                         logger_func(f"Nenhuma UC explícita na página {page_num+1} (provável sumário) de {pdf_filename}. Pulando página.", "INFO")
+                         continue
+                    else:
+                        logger_func(f"Nenhuma UC explícita na página {page_num+1} de {pdf_filename}. Tentando processar a página inteira como um bloco único (pode ser uma fatura de página inteira ou página sem dados).", "INFO")
+                        fatura_data = extract_fatura_data_from_text_block(page_text, df_base, pdf_filename, logger_func)
+                        if fatura_data:
+                            results_for_this_pdf.append(fatura_data)
+                        continue
 
-                # Processa cada bloco de fatura identificado na página
                 for i, match in enumerate(matches):
                     start_block = match.start()
-                    # Determina o fim do bloco atual: é o início do próximo match de UC, ou o fim do texto da página.
                     end_block = matches[i+1].start() if i + 1 < len(matches) else len(page_text)
                     current_text_block = page_text[start_block:end_block]
 
                     fatura_data = extract_fatura_data_from_text_block(current_text_block, df_base, pdf_filename, logger_func)
-                    if fatura_data and "error" not in fatura_data :
+                    if fatura_data:
                         results_for_this_pdf.append(fatura_data)
-                    elif fatura_data and "error" in fatura_data:
-                         results_for_this_pdf.append(fatura_data)
 
-
-            if not results_for_this_pdf and not any("error" in r for r in results_for_this_pdf if isinstance(r,dict)):
-                 # Se após processar todas as páginas, nenhum dado de fatura VÁLIDO foi adicionado
-                 # E não houve erros de UC não encontrada ou PDF sem páginas já logados
-                 no_data_msg = f"Nenhum dado de fatura (com UC identificável) encontrado em {pdf_filename} após processar todas as páginas."
+            if not results_for_this_pdf:
+                 no_data_msg = f"Nenhum dado de fatura (com UC identificável) ou erro relevante encontrado em {pdf_filename} após processar todas as páginas com texto extraível."
                  logger_func(no_data_msg, "WARNING")
-                 # Adiciona um item de erro genérico para este PDF se nenhum outro erro específico foi registrado
-                 if not any(isinstance(r, dict) and r.get("pdf_filename") == pdf_filename for r in results_for_this_pdf):
-                    results_for_this_pdf.append({"error": no_data_msg, "pdf_filename": pdf_filename, "UC": "N/A"})
-
 
     except Exception as e:
         critical_error_msg = f"Erro crítico ao processar {pdf_filename}: {e}"
@@ -226,7 +207,13 @@ class AppCelescReporter:
         self.root.title("Gerador de Relatório Celesc")
         self.center_window(700, 650)
 
-        self.base_sheet_path = os.path.join(os.path.dirname(sys.argv[0]), "base", "ucs.sub.xlsx")
+        if getattr(sys, 'frozen', False):
+             basedir = os.path.dirname(sys.executable)
+        else:
+             basedir = os.path.dirname(__file__)
+
+        self.base_sheet_path = os.path.join(basedir, "base", "ucs.sub.xlsx")
+
         self.df_base = None
         self.pdf_files = []
         self.output_dir = os.path.join(os.path.expanduser("~"), "Desktop")
@@ -243,8 +230,22 @@ class AppCelescReporter:
         self.base_path_label.pack(fill=tk.X)
         self.base_status_label = ttk.Label(base_frame, text="Status: Não carregada")
         self.base_status_label.pack(fill=tk.X)
-        self.load_base_sheet()
+        
+        # --- Seção Log em Tempo Real (Inicializada mais cedo para evitar AttributeError) ---
+        log_frame = ttk.LabelFrame(main_frame, text="Log de Processamento", padding="10")
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=5) # Empacotado antes de ser referenciado
+        
+        self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, height=10, state=tk.DISABLED)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        self.log_text.tag_config("INFO", foreground="black")
+        self.log_text.tag_config("WARNING", foreground="orange")
+        self.log_text.tag_config("ERROR", foreground="red")
+        self.log_text.tag_config("CRITICAL_ERROR", foreground="red", font=('TkDefaultFont', 9, 'bold'))
+        self.log_text.tag_config("SUCCESS", foreground="green")
+        self.log_text.tag_config("DEBUG", foreground="gray")
 
+        self.load_base_sheet() # Agora pode ser chamado sem erro, pois self.log_text existe
+        
         pdf_frame = ttk.LabelFrame(main_frame, text="Arquivos PDF das Faturas", padding="10")
         pdf_frame.pack(fill=tk.X, pady=5)
         self.pdf_button = ttk.Button(pdf_frame, text="Selecionar PDFs da Celesc", command=self.select_pdfs)
@@ -271,19 +272,6 @@ class AppCelescReporter:
         self.status_label = ttk.Label(action_frame, text="Aguardando configuração...")
         self.status_label.pack(fill=tk.X, pady=5)
 
-        log_frame = ttk.LabelFrame(main_frame, text="Log de Processamento", padding="10")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-
-        self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, height=10, state=tk.DISABLED)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
-        self.log_text.tag_config("INFO", foreground="black")
-        self.log_text.tag_config("WARNING", foreground="orange")
-        self.log_text.tag_config("ERROR", foreground="red")
-        self.log_text.tag_config("CRITICAL_ERROR", foreground="red", font=('TkDefaultFont', 9, 'bold'))
-        self.log_text.tag_config("SUCCESS", foreground="green")
-        self.log_text.tag_config("DEBUG", foreground="gray")
-
-
     def log_message(self, message, level="INFO"):
         self.log_text.config(state=tk.NORMAL)
         self.log_text.insert(tk.END, f"[{level}] {message}\n", level.upper())
@@ -299,21 +287,23 @@ class AppCelescReporter:
         self.root.geometry(f'{width}x{height}+{int(x)}+{int(y)}')
 
     def load_base_sheet(self):
+        """Carrega a planilha base de UCs e atualiza o status na GUI."""
+        self.log_message("Tentando carregar planilha base...", "INFO")
         try:
             if not os.path.exists(self.base_sheet_path):
                 msg = f"Status: ERRO - Arquivo base não encontrado em {self.base_sheet_path}"
                 self.base_status_label.config(text=msg, foreground="red")
-                if hasattr(self, 'log_text'): self.log_message(msg, "ERROR")
+                self.log_message(msg, "ERROR")
                 self.df_base = None
                 return
 
-            self.df_base = pd.read_excel(self.base_sheet_path, dtype={'UC': str, 'Cod de Reg': str, 'Nome': str})
+            self.df_base = pd.read_excel(self.base_sheet_path, engine='openpyxl', dtype={'UC': str, 'Cod de Reg': str, 'Nome': str})
             required_cols = ['UC', 'Cod de Reg', 'Nome']
             if not all(col in self.df_base.columns for col in required_cols):
                 missing_cols = [col for col in required_cols if col not in self.df_base.columns]
-                msg = f"Status: ERRO - Colunas faltando na planilha base: {', '.join(missing_cols)}"
+                msg = f"Status: ERRO - Colunas faltando na planilha base: {', '.join(missing_cols)}. Necessárias: {', '.join(required_cols)}"
                 self.base_status_label.config(text=msg, foreground="red")
-                if hasattr(self, 'log_text'): self.log_message(msg, "ERROR")
+                self.log_message(msg, "ERROR")
                 self.df_base = None
                 return
 
@@ -322,20 +312,21 @@ class AppCelescReporter:
 
             num_ucs = len(self.df_base)
             if num_ucs == 0:
-                msg = "Status: Planilha base carregada, mas sem UCs válidas."
+                msg = "Status: Planilha base carregada, mas sem UCs válidas após limpeza."
                 self.base_status_label.config(text=msg, foreground="orange")
-                if hasattr(self, 'log_text'): self.log_message(msg, "WARNING")
+                self.log_message(msg, "WARNING")
             else:
                 msg = f"Status: Planilha base carregada. {num_ucs} UCs encontradas."
                 self.base_status_label.config(text=msg, foreground="green")
-                if hasattr(self, 'log_text'): self.log_message(msg, "INFO")
+                self.log_message(msg, "INFO")
         except Exception as e:
             msg = f"Status: ERRO ao carregar planilha base - {e}"
             self.base_status_label.config(text=msg, foreground="red")
-            if hasattr(self, 'log_text'): self.log_message(msg, "CRITICAL_ERROR")
+            self.log_message(msg, "CRITICAL_ERROR")
             self.df_base = None
 
     def select_pdfs(self):
+        """Permite ao usuário selecionar múltiplos arquivos PDF."""
         files = filedialog.askopenfilenames(
             title="Selecione os arquivos PDF da Celesc",
             filetypes=(("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*"))
@@ -350,6 +341,7 @@ class AppCelescReporter:
             self.pdf_files = []
 
     def select_output_dir(self):
+        """Permite ao usuário selecionar a pasta de saída para o relatório."""
         directory = filedialog.askdirectory(title="Selecione a pasta para salvar o relatório")
         if directory:
             self.output_dir = directory
@@ -357,6 +349,7 @@ class AppCelescReporter:
             self.log_message(f"Pasta de saída definida para: {self.output_dir}", "INFO")
 
     def start_processing(self):
+        """Inicia o processo de extração e geração do relatório."""
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete('1.0', tk.END)
         self.log_text.config(state=tk.DISABLED)
@@ -380,14 +373,14 @@ class AppCelescReporter:
             return
 
         self.status_label.config(text="Processando... Por favor, aguarde.")
-        self.log_message("Iniciando processamento dos PDFs...", "INFO")
+        self.log_message(f"Processando {len(self.pdf_files)} PDFs...", "INFO")
         self.process_button.config(state=tk.DISABLED)
         self.progress_bar["value"] = 0
         self.progress_bar["maximum"] = len(self.pdf_files)
         self.root.update_idletasks()
 
-        all_extracted_data = [] # Renomeado de all_processed_data para clareza
-        error_items = [] # Lista para armazenar itens de erro separadamente
+        all_extracted_data = []
+        error_items = []
 
         for i, pdf_path in enumerate(self.pdf_files):
             pdf_name = os.path.basename(pdf_path)
@@ -396,95 +389,83 @@ class AppCelescReporter:
             self.progress_bar["value"] = i + 1
             self.root.update_idletasks()
 
-            # results_from_pdf é uma lista de dicionários (dados ou erros)
             results_from_pdf = process_pdf_file(pdf_path, self.df_base, self.log_message)
 
             for item in results_from_pdf:
-                if isinstance(item, dict) and "error" in item:
-                    # Se o item é um erro, adiciona à lista de erros.
-                    # Certifique-se de que 'UC' e 'pdf_filename' estão presentes para o relatório de erros.
-                    error_item = {
-                        "UC": item.get("UC", "N/A"), # Pega UC do item de erro, ou N/A
-                        "Cod de Reg": "ERRO",
-                        "Nome": "ERRO",
-                        "Valor Líquido (R$)": 0.0,
-                        "Desconto de Tributos Retidos (R$)": 0.0,
-                        "Valor Bruto (R$)": 0.0,
-                        "pdf_filename": item.get("pdf_filename", pdf_name),
-                        "Observação": item["error"]
-                    }
-                    error_items.append(error_item)
-                elif isinstance(item, dict): # Item de dados válido
-                    all_extracted_data.append(item)
-        
+                if isinstance(item, dict):
+                    if "error" in item:
+                        error_item = {
+                            "UC": item.get("UC", "N/A"),
+                            "Cod de Reg": "ERRO",
+                            "Nome": "ERRO",
+                            "Valor Líquido (R$)": 0.0,
+                            "Desconto de Tributos Retidos (R$)": 0.0,
+                            "Valor Bruto (R$)": 0.0,
+                            "pdf_filename": item.get("pdf_filename", pdf_name),
+                            "Observação": item["error"]
+                        }
+                        error_items.append(error_item)
+                    else:
+                        all_extracted_data.append(item)
+
         self.process_button.config(state=tk.NORMAL)
 
-        if not all_extracted_data and not error_items: # Caso nenhum PDF produziu dados ou erros (improvável com a lógica atual)
-            final_msg = "Nenhum dado de fatura ou erro foi retornado do processamento dos PDFs."
-            self.log_message(final_msg, "WARNING")
-            messagebox.showwarning("Processamento Concluído", final_msg)
-            self.status_label.config(text="Concluído. Nenhum dado.")
-            return
-        
-        if not all_extracted_data and error_items: # Apenas erros foram encontrados
-            final_msg = "Nenhum dado de fatura válido foi extraído. Apenas erros foram reportados."
-            self.log_message(final_msg, "WARNING")
-            # Prossegue para gerar o relatório de erros.
-        
-        # Define as colunas finais do relatório
-        final_columns_order = [
+        final_columns_order_data = [
             "UC", "Cod de Reg", "Nome",
             "Valor Líquido (R$)",
             "Desconto de Tributos Retidos (R$)",
             "Valor Bruto (R$)",
             "pdf_filename"
         ]
-        # Colunas para o relatório de erros
-        error_columns_order = final_columns_order + ["Observação"]
+        final_columns_order_errors = final_columns_order_data + ["Observação"]
 
+        df_report_data = pd.DataFrame(all_extracted_data)
 
-        df_report = pd.DataFrame(all_extracted_data)
-        
-        # Garante que todas as colunas esperadas existam no DataFrame de dados válidos, preenchendo com NA se faltar
-        for col in final_columns_order:
-            if col not in df_report.columns and not df_report.empty: # Adiciona coluna apenas se o df não estiver vazio
-                df_report[col] = pd.NA
-        if not df_report.empty:
-            df_report = df_report[final_columns_order] # Reordena/seleciona colunas
+        if not df_report_data.empty:
+            for col in final_columns_order_data:
+                if col not in df_report_data.columns:
+                     df_report_data[col] = pd.NA
+            df_report_data = df_report_data[final_columns_order_data]
 
-        # Colunas que devem ser formatadas como moeda
-        currency_cols_names = [
-            "Valor Líquido (R$)",
-            "Desconto de Tributos Retidos (R$)",
-            "Valor Bruto (R$)"
-        ]
-        if not df_report.empty:
+            currency_cols_names = [
+                "Valor Líquido (R$)",
+                "Desconto de Tributos Retidos (R$)",
+                "Valor Bruto (R$)"
+            ]
             for col_name in currency_cols_names:
-                if col_name in df_report.columns:
-                    df_report[col_name] = pd.to_numeric(df_report[col_name], errors='coerce')
+                if col_name in df_report_data.columns:
+                    df_report_data[col_name] = pd.to_numeric(df_report_data[col_name], errors='coerce')
+                    df_report_data[col_name] = df_report_data[col_name].fillna(0.0)
+        else:
+             df_report_data = pd.DataFrame(columns=final_columns_order_data)
 
-        # Cria DataFrame para erros, se houver
         df_errors = pd.DataFrame()
         if error_items:
             df_errors = pd.DataFrame(error_items)
-            # Garante colunas e ordem para o df_errors
-            for col in error_columns_order:
+            for col in final_columns_order_errors:
                  if col not in df_errors.columns:
-                    df_errors[col] = "" if col == "Observação" else (0.0 if col in currency_cols_names else "N/A")
-            df_errors = df_errors[error_columns_order]
-
+                    default_value = "" if col == "Observação" else (0.0 if col in currency_cols_names else "N/A")
+                    df_errors[col] = default_value
+            df_errors = df_errors[final_columns_order_errors]
+        else:
+             df_errors = pd.DataFrame(columns=final_columns_order_errors)
 
         output_file_path = os.path.join(self.output_dir, "Relatorio_Celesc.xlsx")
 
         try:
             self.log_message(f"Salvando relatório em: {output_file_path}", "INFO")
             with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
-                if not df_report.empty:
-                    df_report.to_excel(writer, index=False, sheet_name='Relatorio_Dados_Extraidos')
+                if not df_report_data.empty:
+                    df_report_data.to_excel(writer, index=False, sheet_name='Relatorio_Dados_Extraidos')
                     workbook = writer.book
                     worksheet = writer.sheets['Relatorio_Dados_Extraidos']
 
-                    df_col_to_excel_col_idx = {col_name: idx + 1 for idx, col_name in enumerate(df_report.columns)}
+                    currency_cols_names = [
+                        "Valor Líquido (R$)",
+                        "Desconto de Tributos Retidos (R$)",
+                        "Valor Bruto (R$)"
+                    ]
+                    df_col_to_excel_col_idx = {col_name: idx + 1 for idx, col_name in enumerate(df_report_data.columns)}
 
                     for col_name_df in currency_cols_names:
                         if col_name_df in df_col_to_excel_col_idx:
@@ -494,9 +475,8 @@ class AppCelescReporter:
                                 cell = worksheet[f'{col_letter}{row_num}']
                                 if cell.value is not None and isinstance(cell.value, (int, float)):
                                     cell.number_format = 'R$ #,##0.00'
-                                    cell.alignment = Alignment(horizontal='right')
                     
-                    for col_idx_df, col_name_df in enumerate(df_report.columns):
+                    for col_idx_df, col_name_df in enumerate(df_report_data.columns):
                         excel_col_idx = col_idx_df + 1
                         column_letter_val = get_column_letter(excel_col_idx)
                         max_len = 0
@@ -521,38 +501,38 @@ class AppCelescReporter:
                 if not df_errors.empty:
                     df_errors.to_excel(writer, index=False, sheet_name='Relatorio_Erros')
                     worksheet_errors = writer.sheets['Relatorio_Erros']
-                    # Autoajuste para a planilha de erros
                     for col_idx_df, col_name_df in enumerate(df_errors.columns):
                         excel_col_idx = col_idx_df + 1
                         column_letter_val = get_column_letter(excel_col_idx)
-                        max_len = len(str(worksheet_errors[f'{column_letter_val}1'].value)) # Cabeçalho
+                        max_len = len(str(worksheet_errors[f'{column_letter_val}1'].value))
                         for row_num in range(2, worksheet_errors.max_row + 1):
                              cell = worksheet_errors[f'{column_letter_val}{row_num}']
                              if cell.value is not None:
                                 max_len = max(max_len, len(str(cell.value)))
                         adjusted_width = (max_len + 2) if max_len > 0 else 12
+                        if col_name_df == "Observação":
+                            adjusted_width = min(adjusted_width, 80)
                         worksheet_errors.column_dimensions[column_letter_val].width = adjusted_width
 
 
-            num_registros_extraidos = len(all_extracted_data)
-            num_erros_reportados = len(error_items)
+            num_registros_extraidos = len(df_report_data)
+            num_erros_reportados = len(df_errors)
             
             summary_message = f"Processamento concluído!\n"
             if num_registros_extraidos > 0:
-                summary_message += f"{num_registros_extraidos} registros de fatura extraídos com sucesso.\n"
+                summary_message += f"{num_registros_extraidos} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
             else:
                  summary_message += "Nenhum registro de fatura válido foi extraído.\n"
 
             if num_erros_reportados > 0:
-                summary_message += f"{num_erros_reportados} problemas/erros encontrados durante o processamento.\n"
-                summary_message += "Verifique a aba 'Relatorio_Erros' no arquivo Excel e o log na janela para detalhes."
+                summary_message += f"{num_erros_reportados} problemas/erros encontrados durante o processamento, listados na aba 'Relatorio_Erros'."
                 self.log_message(f"Processamento concluído com {num_erros_reportados} problemas/erros.", "WARNING")
                 messagebox.showwarning("Processamento Concluído com Alertas", summary_message + f"\nRelatório salvo em:\n{output_file_path}")
-            elif num_registros_extraidos == 0 and num_erros_reportados == 0: # Nenhum PDF, ou PDFs vazios sem erros
-                summary_message = "Nenhum dado foi processado. Verifique se selecionou PDFs e se eles contêm faturas."
+            elif num_registros_extraidos == 0:
+                summary_message = "Nenhum dado foi processado. Verifique se selecionou PDFs e se eles contêm faturas individuais com UCs identificáveis (além da página de sumário)."
                 self.log_message(summary_message, "INFO")
                 messagebox.showinfo("Processamento Concluído", summary_message)
-            else: # Apenas sucessos
+            else:
                 self.log_message("Processamento concluído com sucesso!", "SUCCESS")
                 messagebox.showinfo("Processamento Concluído", summary_message + f"\nRelatório salvo em:\n{output_file_path}")
 
