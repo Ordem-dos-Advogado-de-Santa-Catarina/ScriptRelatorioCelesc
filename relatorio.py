@@ -162,8 +162,8 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
 
     return {
         "UC": uc_number,
-        "Cod de Reg": cod_reg,
-        "Nome": nome_base,
+        "Centro de Custo": cod_reg,
+        "Subseção": nome_base,
         "ENERGIA (R$)": valor_energia_calculado, # Nova coluna
         "COSIP (R$)": valor_cosip, # Nova coluna
         "Valor Bruto (R$)": valor_bruto_fatura_calculado,
@@ -440,13 +440,13 @@ class AppCelescReporter:
                         # Adapta a estrutura de erro para as novas colunas
                         error_item = {
                             "UC": item.get("UC", "N/A"),
-                            "Cod de Reg": "ERRO",
-                            "Nome": "ERRO",
-                            "ENERGIA (R$)": 0.0, # Nova coluna
-                            "COSIP (R$)": 0.0,   # Nova coluna
+                            "Centro de Custo": "ERRO", # Modificado
+                            "Subseção": "ERRO",       # Modificado
+                            "ENERGIA (R$)": 0.0,
+                            "COSIP (R$)": 0.0,
                             "Valor Bruto (R$)": 0.0,
-                            "RETENÇÃO (R$)": 0.0, # Renomeado
-                            "LÍQUIDO (R$)": 0.0, # Renomeado
+                            "RETENÇÃO (R$)": 0.0,
+                            "LÍQUIDO (R$)": 0.0,
                             "Numero da Pagina": item.get("Numero da Pagina", os.path.basename(pdf_path)),
                             "Observação": item["error"]
                         }
@@ -462,22 +462,22 @@ class AppCelescReporter:
         
         # Define a ordem desejada das colunas para o relatório final (DADOS)
         final_columns_order_data = [
-            "UC", "Cod de Reg", "Nome",
-            "ENERGIA (R$)", # Nova coluna
-            "COSIP (R$)",   # Nova coluna
+            "UC", "Centro de Custo", "Subseção", # MODIFICADO AQUI
+            "ENERGIA (R$)",
+            "COSIP (R$)",
             "Valor Bruto (R$)",
-            "RETENÇÃO (R$)", # Renomeado
-            "LÍQUIDO (R$)",  # Renomeado
+            "RETENÇÃO (R$)",
+            "LÍQUIDO (R$)",
             "Numero da Pagina"
         ]
         # Define a ordem desejada das colunas para o relatório de erros
         final_columns_order_errors = [
-            "UC", "Cod de Reg", "Nome",
-            "ENERGIA (R$)", # Nova coluna
-            "COSIP (R$)",   # Nova coluna
+            "UC", "Centro de Custo", "Subseção", # MODIFICADO AQUI
+            "ENERGIA (R$)",
+            "COSIP (R$)",
             "Valor Bruto (R$)",
-            "RETENÇÃO (R$)", # Renomeado
-            "LÍQUIDO (R$)",  # Renomeado
+            "RETENÇÃO (R$)",
+            "LÍQUIDO (R$)",
             "Numero da Pagina",
             "Observação"
         ]
