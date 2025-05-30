@@ -1,7 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import pandas as pd
-import pdfplumber
 import re
 import os
 import subprocess
@@ -17,6 +16,15 @@ except ImportError:
     messagebox.showerror("Dependência Faltando",
                          "A biblioteca 'openpyxl' é necessária para formatação avançada do Excel. "
                          "Por favor, instale-a com 'pip install openpyxl' e tente novamente.")
+    sys.exit(1)
+
+# Tentar importar pdfplumber
+try:
+    import pdfplumber
+except ImportError:
+    messagebox.showerror("Dependência Faltando",
+                         "A biblioteca 'pdfplumber' é necessária para extrair dados de PDFs. "
+                         "Por favor, instale-a com 'pip install pdfplumber' e tente novamente.")
     sys.exit(1)
 
 
@@ -244,6 +252,20 @@ class AppCelescReporter:
              basedir = os.path.dirname(__file__)
 
         self.base_sheet_path = os.path.join(basedir, "base", "ucs.sub.xlsx")
+        
+        # --- Adição para o ícone ---
+        icon_path = os.path.join(basedir, "base", "icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                self.root.iconbitmap(icon_path)
+            except tk.TclError as e:
+                # Logar ou mostrar erro se o ícone não puder ser carregado
+                print(f"Erro ao carregar ícone: {e}") 
+                # messagebox.showwarning("Erro de Ícone", f"Não foi possível carregar o ícone da janela: {e}")
+        else:
+            print(f"Aviso: Arquivo de ícone não encontrado em {icon_path}")
+            # messagebox.showwarning("Erro de Ícone", f"Arquivo de ícone não encontrado em {icon_path}")
+        # --- Fim da adição para o ícone ---
 
         self.df_base = None
         self.pdf_files = []
