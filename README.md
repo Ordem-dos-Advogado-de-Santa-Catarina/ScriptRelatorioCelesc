@@ -30,16 +30,5 @@ Este projeto é uma aplicação em Python com interface gráfica (GUI) que permi
 - openpyxl (para manipulação avançada do Excel)
 - Regex para extração de dados
 
----
 
-## 📦 Instalação
-
-### 🔗 Pré-requisitos
-
-- Python 3.8 ou superior instalado.  
-Se não tiver, [baixe aqui](https://www.python.org/downloads/).
-
-### 🧠 Instale as dependências
-
-Execute no terminal ou prompt de comando:
 
