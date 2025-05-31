@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import logging
-import threading  # Importa a biblioteca threading
+import threading
 
 # Tentar importar openpyxl e seus componentes necessários
 try:
@@ -139,7 +139,7 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
             found_any_tax_value_non_zero = True
 
     retencao_tributos = abs(soma_valores_negativos_tributos) # Nome da variável atualizado para RETENÇÃO
-    
+
     if retencao_tributos == 0.0 and not found_any_tax_value_non_zero and logger_func:
          logger_func(f"INFO: Nenhum item de tributo retido ('Tributo Retido IRPJ/PIS/COFINS/CSLL') encontrado ou extraído com valor não zero para UC {uc_number} em {pdf_filename_for_error_logging}. 'RETENÇÃO (R$)' será 0.00.", "INFO")
 
@@ -160,7 +160,7 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
         logger_func(f"INFO: COSIP (ou 'COSIP Municipal') não encontrado ou extraído com valor zero para UC {uc_number} em {pdf_filename_for_error_logging}. 'COSIP (R$)' será 0.00.", "INFO")
 
     valor_bruto_fatura_calculado = valor_liquido_fatura + retencao_tributos # Valor bruto antes do COSIP
-    
+
     # Novo cálculo: Energia = Valor Bruto - COSIP
     valor_energia_calculado = valor_bruto_fatura_calculado - valor_cosip
 
@@ -180,7 +180,7 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
         "Numero da Pagina": numero_pagina_display # Chave alterada
     }
 
-def process_pdf_file(pdf_path, df_base, logger_func):
+def process_pdf_file(pdf_path, df_base, logger_func, progress_callback): # Adicionado progress_callback
     """
     Processa um único arquivo PDF.
     Retorna uma lista de dicionários (dados da fatura ou erros).
@@ -194,12 +194,20 @@ def process_pdf_file(pdf_path, df_base, logger_func):
                 error_msg = f"PDF sem páginas: {pdf_filename}"
                 logger_func(error_msg, "ERROR")
                 results_for_this_pdf.append({"error": error_msg, "Numero da Pagina": pdf_filename}) # Chave alterada para erro
+                # Chamar callback de progresso mesmo para PDFs vazios para contabilizá-los
+                if progress_callback:
+                    progress_callback(len(pdf.pages)) # Passa 0 se não houver páginas
                 return results_for_this_pdf
+
+            total_pages_in_pdf = len(pdf.pages)
 
             for page_num, page in enumerate(pdf.pages): # page_num está disponível aqui
                 page_text = page.extract_text(x_tolerance=2, y_tolerance=3)
                 if not page_text or not page_text.strip():
                     logger_func(f"Página {page_num + 1} de {pdf_filename} não contém texto extraível.", "INFO")
+                    # Chamar callback de progresso para a página processada (mesmo que vazia)
+                    if progress_callback:
+                         progress_callback(1)
                     continue
 
                 uc_pattern = r"(?:UC:|Unidade Consumidora:)\s*\d+"
@@ -208,6 +216,9 @@ def process_pdf_file(pdf_path, df_base, logger_func):
                 if not matches:
                     if page_num == 0:
                          logger_func(f"Nenhuma UC explícita na página {page_num+1} (provável sumário) de {pdf_filename}. Pulando página.", "INFO")
+                         # Chamar callback de progresso para a página processada
+                         if progress_callback:
+                            progress_callback(1)
                          continue
                     else:
                         logger_func(f"Nenhuma UC explícita na página {page_num+1} de {pdf_filename}. Tentando processar a página inteira como um bloco único (pode ser uma fatura de página inteira ou página sem dados).", "INFO")
@@ -215,6 +226,9 @@ def process_pdf_file(pdf_path, df_base, logger_func):
                         fatura_data = extract_fatura_data_from_text_block(page_text, df_base, pdf_filename, logger_func, page_num=page_num)
                         if fatura_data:
                             results_for_this_pdf.append(fatura_data)
+                        # Chamar callback de progresso para a página processada
+                        if progress_callback:
+                           progress_callback(1)
                         continue
 
                 for i, match in enumerate(matches):
@@ -227,6 +241,11 @@ def process_pdf_file(pdf_path, df_base, logger_func):
                     if fatura_data:
                         results_for_this_pdf.append(fatura_data)
 
+                # Chamar callback de progresso para a página processada
+                if progress_callback:
+                   progress_callback(1)
+
+
             if not results_for_this_pdf:
                  no_data_msg = f"Nenhum dado de fatura (com UC identificável) ou erro relevante encontrado em {pdf_filename} após processar todas as páginas com texto extraível."
                  logger_func(no_data_msg, "WARNING")
@@ -235,6 +254,13 @@ def process_pdf_file(pdf_path, df_base, logger_func):
         critical_error_msg = f"Erro crítico ao processar {pdf_filename}: {e}"
         logger_func(critical_error_msg, "CRITICAL_ERROR")
         results_for_this_pdf.append({"error": critical_error_msg, "Numero da Pagina": pdf_filename, "UC": "N/A"}) # Chave alterada para erro
+        # Chamar callback de progresso para o PDF que deu erro
+        if progress_callback:
+           try: # Tenta contar as páginas para avançar a barra
+               with pdfplumber.open(pdf_path) as pdf_err:
+                    progress_callback(len(pdf_err.pages))
+           except Exception: # Se não conseguir contar, avança 1 step para não travar a barra
+                progress_callback(1)
 
     return results_for_this_pdf
 
@@ -251,8 +277,8 @@ class AppCelescReporter:
         else:
              basedir = os.path.dirname(__file__)
 
-        self.base_sheet_path = os.path.join(basedir, "base", "ucs.sub.xlsx")
-        
+        self.base_sheet_path = os.path.join(basedir, "base", "database.xlsx")
+
         # --- Adição para o ícone ---
         icon_path = os.path.join(basedir, "base", "icon.ico")
         if os.path.exists(icon_path):
@@ -260,7 +286,7 @@ class AppCelescReporter:
                 self.root.iconbitmap(icon_path)
             except tk.TclError as e:
                 # Logar ou mostrar erro se o ícone não puder ser carregado
-                print(f"Erro ao carregar ícone: {e}") 
+                print(f"Erro ao carregar ícone: {e}")
                 # messagebox.showwarning("Erro de Ícone", f"Não foi possível carregar o ícone da janela: {e}")
         else:
             print(f"Aviso: Arquivo de ícone não encontrado em {icon_path}")
@@ -269,10 +295,17 @@ class AppCelescReporter:
 
         self.df_base = None
         self.pdf_files = []
+        self.total_pages_to_process = 0 # Novo: Total de páginas em todos os PDFs
+        self.processed_pages_count = 0 # Novo: Contador de páginas processadas
         self.output_dir = os.path.join(os.path.expanduser("~"), "Desktop")
 
         style = ttk.Style(self.root)
         style.theme_use('clam')
+        # Definir estilos para a barra de progresso
+        style.configure("Default.Horizontal.TProgressbar", troughcolor='white', background='green') # Barra verde durante o processamento
+        style.configure("Success.Horizontal.TProgressbar", troughcolor='white', background='green')
+        style.configure("Error.Horizontal.TProgressbar", troughcolor='white', background='red')
+
 
         main_frame = ttk.Frame(self.root, padding="10 10 10 10")
         main_frame.pack(expand=True, fill=tk.BOTH)
@@ -283,11 +316,11 @@ class AppCelescReporter:
         self.base_path_label.pack(fill=tk.X)
         self.base_status_label = ttk.Label(base_frame, text="Status: Não carregada")
         self.base_status_label.pack(fill=tk.X)
-        
+
         # --- Seção Log em Tempo Real (Inicializada mais cedo para evitar AttributeError) ---
         log_frame = ttk.LabelFrame(main_frame, text="Log de Processamento", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True, pady=5) # Empacotado antes de ser referenciado
-        
+
         self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, height=10, state=tk.DISABLED)
         self.log_text.pack(fill=tk.BOTH, expand=True)
         self.log_text.tag_config("INFO", foreground="black")
@@ -298,7 +331,7 @@ class AppCelescReporter:
         self.log_text.tag_config("DEBUG", foreground="gray")
 
         self.load_base_sheet() # Agora pode ser chamado sem erro, pois self.log_text existe
-        
+
         pdf_frame = ttk.LabelFrame(main_frame, text="Arquivos PDF das Faturas", padding="10")
         pdf_frame.pack(fill=tk.X, pady=5)
         self.pdf_button = ttk.Button(pdf_frame, text="Selecionar PDFs da Celesc", command=self.select_pdfs)
@@ -316,7 +349,9 @@ class AppCelescReporter:
         action_frame = ttk.Frame(main_frame, padding="10")
         action_frame.pack(fill=tk.X, pady=10)
 
-        self.progress_bar = ttk.Progressbar(action_frame, orient="horizontal", length=300, mode="determinate")
+        # Configura a barra para usar o estilo "Default" (verde)
+        self.progress_bar = ttk.Progressbar(action_frame, orient="horizontal", length=300, mode="determinate",
+                                            style="Default.Horizontal.TProgressbar")
         self.progress_bar.pack(pady=5, fill=tk.X)
 
         self.process_button = ttk.Button(action_frame, text="Iniciar Processamento de Relatório", command=self.start_processing)
@@ -325,12 +360,33 @@ class AppCelescReporter:
         self.status_label = ttk.Label(action_frame, text="Aguardando configuração...")
         self.status_label.pack(fill=tk.X, pady=5)
 
+    def set_progress_bar_style(self, style_name):
+        """Define o estilo visual da barra de progresso."""
+        self.progress_bar.config(style=style_name)
+
     def log_message(self, message, level="INFO"):
         self.log_text.config(state=tk.NORMAL)
         self.log_text.insert(tk.END, f"[{level}] {message}\n", level.upper())
         self.log_text.config(state=tk.DISABLED)
         self.log_text.see(tk.END)
-        self.root.update_idletasks()
+        # Use root.update_idletasks() para garantir que a GUI seja atualizada imediatamente
+        # self.root.update_idletasks() # Pode causar lentidão se chamado muitas vezes em loop
+
+    def update_progress(self, pages_processed):
+        """Atualiza a barra de progresso e o status label."""
+        self.processed_pages_count += pages_processed
+        current_progress = self.processed_pages_count
+        total_steps = self.total_pages_to_process # Usamos o total de páginas como total de steps
+
+        # Garante que o valor não exceda o máximo
+        if current_progress > total_steps:
+            current_progress = total_steps
+
+        # Agendamos a atualização na thread principal usando root.after
+        self.root.after(0, lambda: self.progress_bar.config(value=current_progress))
+        # Atualiza o status com base no número de páginas processadas
+        self.root.after(0, lambda: self.status_label.config(text=f"Processando página {current_progress}/{total_steps}..."))
+
 
     def center_window(self, width, height):
         screen_width = self.root.winfo_screenwidth()
@@ -410,7 +466,7 @@ class AppCelescReporter:
 
         self.load_base_sheet()
         if self.df_base is None or self.df_base.empty:
-            msg = "Planilha base de UCs não carregada, inválida ou vazia. Verifique o arquivo 'base/ucs.sub.xlsx'."
+            msg = "Planilha base de UCs não carregada, inválida ou vazia. Verifique o arquivo 'base/database.xlsx'."
             self.log_message(msg, "ERROR")
             messagebox.showerror("Erro de Configuração", msg)
             return
@@ -425,45 +481,69 @@ class AppCelescReporter:
             messagebox.showerror("Erro de Configuração", msg)
             return
 
-        self.status_label.config(text="Processando... Por favor, aguarde.")
+        # --- Calcular o total de páginas antes de iniciar o processamento real ---
+        self.total_pages_to_process = 0
+        self.log_message("Contando total de páginas nos PDFs...", "INFO")
+        try:
+            for pdf_path in self.pdf_files:
+                try:
+                    with pdfplumber.open(pdf_path) as pdf:
+                        self.total_pages_to_process += len(pdf.pages)
+                except Exception as e:
+                    self.log_message(f"AVISO: Não foi possível contar páginas em {os.path.basename(pdf_path)}: {e}", "WARNING")
+                    # Se der erro ao contar, ainda assim adicionamos 1 para não travar a barra se for um PDF inválido
+                    self.total_pages_to_process += 1
+            self.log_message(f"Total de páginas a processar: {self.total_pages_to_process}", "INFO")
+        except Exception as e:
+            self.log_message(f"Erro ao calcular total de páginas: {e}. Usando contagem mínima (1 por PDF).", "ERROR")
+            # Em caso de erro na contagem inicial, define um mínimo para não travar
+            self.total_pages_to_process = max(1, len(self.pdf_files))
+
+
+        # --- Preparar a barra de progresso e iniciar a thread ---
+        self.processed_pages_count = 0 # Resetar o contador de páginas processadas
+        self.status_label.config(text=f"Preparando para processar {self.total_pages_to_process} páginas...")
         self.process_button.config(state=tk.DISABLED) # Desabilita o botão enquanto processa
         self.progress_bar["value"] = 0
-        self.progress_bar["maximum"] = len(self.pdf_files)
+        self.progress_bar["maximum"] = self.total_pages_to_process
+        self.set_progress_bar_style("Default.Horizontal.TProgressbar") # Define a cor verde para iniciar
+
         self.root.update_idletasks() # Garante que a GUI seja atualizada antes da thread iniciar
 
         # Inicia o processamento real em uma thread separada
         processing_thread = threading.Thread(target=self._actual_processing_task)
         processing_thread.start()
-    
+
     def _actual_processing_task(self):
         """Contém o loop principal de processamento de PDF, executa em uma thread separada."""
         all_extracted_data = []
         error_items = []
-        total_pdfs = len(self.pdf_files)
+        erros_encontrados_no_processamento = False # Flag para verificar erros
 
         # Atualizações iniciais da GUI via root.after para garantir que rodem na thread principal
-        self.root.after(0, lambda: self.progress_bar.config(value=0, maximum=total_pdfs))
-        self.root.after(0, lambda: self.status_label.config(text=f"Processando {total_pdfs} PDFs..."))
-        self.log_message(f"Iniciando processamento de {total_pdfs} PDFs...", "INFO")
+        self.root.after(0, lambda: self.progress_bar.config(value=0, maximum=self.total_pages_to_process))
+        self.root.after(0, lambda: self.status_label.config(text=f"Iniciando processamento de {self.total_pages_to_process} páginas..."))
+        self.root.after(0, lambda: self.set_progress_bar_style("Default.Horizontal.TProgressbar")) # Garante que a barra comece verde
 
+        self.log_message(f"Iniciando processamento de {len(self.pdf_files)} PDFs ({self.total_pages_to_process} páginas totais)...", "INFO")
 
-        for i, pdf_path in enumerate(self.pdf_files):
+        # Iterar sobre cada PDF
+        for pdf_path in self.pdf_files:
             pdf_name = os.path.basename(pdf_path)
-            # Atualiza elementos da GUI periodicamente da thread principal via root.after
-            self.root.after(0, lambda p=pdf_name, idx=i: self.status_label.config(text=f"Processando PDF {idx+1}/{total_pdfs}: {p}"))
-            self.root.after(0, lambda val=i+1: self.progress_bar.config(value=val))
-            self.log_message(f"Processando PDF {i+1}/{total_pdfs}: {pdf_name}", "INFO")
+            self.log_message(f"Processando PDF: {pdf_name}", "INFO")
 
-            results_from_pdf = process_pdf_file(pdf_path, self.df_base, self.log_message)
+            # Chama process_pdf_file, passando o callback de progresso
+            results_from_pdf = process_pdf_file(pdf_path, self.df_base, self.log_message, self.update_progress)
 
             for item in results_from_pdf:
                 if isinstance(item, dict):
                     if "error" in item:
+                        erros_encontrados_no_processamento = True # Define a flag se encontrar um erro
                         # Adapta a estrutura de erro para as novas colunas
                         error_item = {
                             "UC": item.get("UC", "N/A"),
-                            "Centro de Custo": "ERRO", # Modificado
-                            "Subseção": "ERRO",       # Modificado
+                            "Centro de Custo": "ERRO",
+                            "Subseção": "ERRO",
                             "ENERGIA (R$)": 0.0,
                             "COSIP (R$)": 0.0,
                             "Valor Bruto (R$)": 0.0,
@@ -475,16 +555,17 @@ class AppCelescReporter:
                         error_items.append(error_item)
                     else:
                         all_extracted_data.append(item)
-        
-        # Após o loop, agenda a finalização na thread principal
-        self.root.after(0, lambda: self._processing_complete(all_extracted_data, error_items))
 
-    def _processing_complete(self, all_extracted_data, error_items):
+        # Após o loop, agenda a finalização na thread principal, passando a flag de erros
+        self.root.after(0, lambda: self._processing_complete(all_extracted_data, error_items, erros_encontrados_no_processamento))
+
+
+    def _processing_complete(self, all_extracted_data, error_items, erros_encontrados_no_processamento):
         """Finaliza o processamento, cria o relatório Excel e atualiza a GUI."""
-        
+
         # Define a ordem desejada das colunas para o relatório final (DADOS)
         final_columns_order_data = [
-            "UC", "Centro de Custo", "Subseção", # MODIFICADO AQUI
+            "UC", "Centro de Custo", "Subseção",
             "ENERGIA (R$)",
             "COSIP (R$)",
             "Valor Bruto (R$)",
@@ -494,7 +575,7 @@ class AppCelescReporter:
         ]
         # Define a ordem desejada das colunas para o relatório de erros
         final_columns_order_errors = [
-            "UC", "Centro de Custo", "Subseção", # MODIFICADO AQUI
+            "UC", "Centro de Custo", "Subseção",
             "ENERGIA (R$)",
             "COSIP (R$)",
             "Valor Bruto (R$)",
@@ -562,7 +643,7 @@ class AppCelescReporter:
                                 cell = worksheet[f'{col_letter}{row_num}']
                                 if cell.value is not None and isinstance(cell.value, (int, float)):
                                     cell.number_format = 'R$ #,##0.00'
-                    
+
                     # Ajusta a largura das colunas para Relatorio_Dados_Extraidos
                     for col_idx_df, col_name_df in enumerate(final_columns_order_data): # Usa final_columns_order_data para indexação correta
                         excel_col_idx = col_idx_df + 1
@@ -586,7 +667,7 @@ class AppCelescReporter:
                                 max_len = max(max_len, len(cell_str_val))
                         adjusted_width = (max_len + 2) if max_len > 0 else 12
                         worksheet.column_dimensions[column_letter_val].width = adjusted_width
-                
+
                 if not df_errors.empty:
                     df_errors.to_excel(writer, index=False, sheet_name='Relatorio_Erros')
                     worksheet_errors = writer.sheets['Relatorio_Erros']
@@ -607,27 +688,32 @@ class AppCelescReporter:
 
             num_registros_extraidos = len(df_report_data)
             num_erros_reportados = len(df_errors)
-            
-            summary_message = f"Processamento concluído!\n"
-            if num_registros_extraidos > 0:
-                summary_message += f"{num_registros_extraidos} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
-            else:
-                 summary_message += "Nenhum registro de fatura válido foi extraído.\n"
 
-            if num_erros_reportados > 0:
-                summary_message += f"{num_erros_reportados} problemas/erros encontrados durante o processamento, listados na aba 'Relatorio_Erros'."
-                self.log_message(f"Processamento concluído com {num_erros_reportados} problemas/erros.", "WARNING")
-                messagebox.showwarning("Processamento Concluído com Alertas", summary_message + f"\nRelatório salvo em:\n{output_file_path}")
+            # --- Atualiza a barra e status com base na flag de erros ---
+            if erros_encontrados_no_processamento:
+                 self.set_progress_bar_style("Error.Horizontal.TProgressbar") # Cor vermelha
+                 self.status_label.config(text="Concluído com ERROS.")
+                 summary_message = f"Processamento concluído com ERROS!\n"
+                 if num_registros_extraidos > 0:
+                    summary_message += f"{num_registros_extraidos} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
+                 summary_message += f"{num_erros_reportados} problemas/erros encontrados durante o processamento, listados na aba 'Relatorio_Erros'."
+                 self.log_message(f"Processamento concluído com {num_erros_reportados} problemas/erros.", "WARNING")
+                 messagebox.showwarning("Processamento Concluído com Alertas", summary_message + f"\nRelatório salvo em:\n{output_file_path}")
             elif num_registros_extraidos == 0:
-                summary_message = "Nenhum dado foi processado. Verifique se selecionou PDFs e se eles contêm faturas individuais com UCs identificáveis (além da página de sumário)."
+                self.set_progress_bar_style("Error.Horizontal.TProgressbar") # Cor vermelha se nenhum dado foi extraído
+                summary_message = "Processamento concluído. Nenhum dado de fatura válido foi extraído.\nVerifique se selecionou PDFs e se eles contêm faturas individuais com UCs identificáveis (além da página de sumário)."
+                self.status_label.config(text="Concluído (Sem dados extraídos).")
                 self.log_message(summary_message, "INFO")
                 messagebox.showinfo("Processamento Concluído", summary_message)
             else:
+                self.set_progress_bar_style("Success.Horizontal.TProgressbar") # Cor verde
+                self.status_label.config(text="Concluído com sucesso!")
+                summary_message = f"Processamento concluído com sucesso!\n{num_registros_extraidos} registros de fatura extraídos na aba 'Relatorio_Dados_Extraidos'."
                 self.log_message("Processamento concluído com sucesso!", "SUCCESS")
                 messagebox.showinfo("Processamento Concluído", summary_message + f"\nRelatório salvo em:\n{output_file_path}")
 
-            self.status_label.config(text="Concluído. Relatório gerado.")
 
+            # Abre o arquivo após salvar
             if os.path.exists(output_file_path):
                 try:
                     if sys.platform == "win32":
@@ -640,12 +726,13 @@ class AppCelescReporter:
                     self.log_message(f"Não foi possível abrir o relatório automaticamente: {open_e}", "WARNING")
 
         except Exception as e:
+            self.set_progress_bar_style("Error.Horizontal.TProgressbar") # Cor vermelha em caso de erro ao salvar
             self.log_message(f"Erro CRÍTICO ao salvar o relatório Excel: {e}", "CRITICAL_ERROR")
             messagebox.showerror("Erro ao Salvar", f"Não foi possível salvar o relatório Excel: {e}")
             self.status_label.config(text="Erro ao salvar relatório.")
         finally:
-            self.process_button.config(state=tk.NORMAL) # Reabilita o botão em caso de erro ao salvar
-            self.progress_bar.config(value=0) # Reseta a barra de progresso
+            self.process_button.config(state=tk.NORMAL) # Reabilita o botão
+
 
 if __name__ == "__main__":
     root = tk.Tk()
