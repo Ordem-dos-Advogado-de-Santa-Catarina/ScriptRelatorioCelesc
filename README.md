@@ -1,8 +1,8 @@
-# 📑 Gerador de Relatório de Faturas Celesc
+# 💾 Gerador de Relatório de Faturas Celesc
 
 Este projeto é uma aplicação em Python com interface gráfica (GUI) que permite extrair dados de faturas da Celesc em formato PDF e gerar um relatório consolidado em Excel. É especialmente útil para empresas ou usuários que precisam auditar, conferir ou organizar informações de múltiplas contas de energia.
 
-## 🚀 Funcionalidades
+## 📎 Funcionalidades
 
 - 📄 Processa vários arquivos PDF de faturas da Celesc.
 - 🔍 Faz a leitura dos dados:
@@ -21,7 +21,7 @@ Este projeto é uma aplicação em Python com interface gráfica (GUI) que permi
 
 ---
 
-# 📑 Manual de Uso - Gerador de Relatórios CELESC
+# 📖 Manual de Uso - Gerador de Relatórios CELESC
 
 ## ⚙️ Configuração da Planilha Base
 
