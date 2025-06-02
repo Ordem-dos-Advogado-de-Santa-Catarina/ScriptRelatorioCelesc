@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext, Canvas, Toplevel, Label, Frame # Adicionado Canvas, Toplevel, Label, Frame
+from tkinter import ttk, filedialog, messagebox, scrolledtext, Canvas, Toplevel, Label, Frame
 import pandas as pd
 import re
 import os
@@ -291,29 +291,29 @@ class AppCelescReporter:
         self.base_sheet_path = os.path.join(basedir, "base", "database.xlsx")
 
         # --- Adição para o ícone ---
-        icon_path = os.path.join(basedir, "base", "icon.ico")
-        if os.path.exists(icon_path):
+        self.icon_path = os.path.join(basedir, "base", "icon.ico") # Armazenar o caminho do ícone
+        if os.path.exists(self.icon_path):
             try:
-                self.root.iconbitmap(icon_path)
+                self.root.iconbitmap(self.icon_path)
             except tk.TclError as e:
                 # Logar ou mostrar erro se o ícone não puder ser carregado
                 print(f"Erro ao carregar ícone: {e}")
                 # messagebox.showwarning("Erro de Ícone", f"Não foi possível carregar o ícone da janela: {e}")
         else:
-            print(f"Aviso: Arquivo de ícone não encontrado em {icon_path}")
-            # messagebox.showwarning("Erro de Ícone", f"Arquivo de ícone não encontrado em {icon_path}")
+            print(f"Aviso: Arquivo de ícone não encontrado em {self.icon_path}")
+            # messagebox.showwarning("Erro de Ícone", f"Arquivo de ícone não encontrado em {self.icon_path}")
         # --- Fim da adição para o ícone ---
 
         self.df_base = None
         self.pdf_files = []
-        self.total_pages_to_process = 0 # Novo: Total de páginas em todos os PDFs
-        self.processed_pages_count = 0 # Novo: Contador de páginas processadas
+        self.total_pages_to_process = 0
+        self.processed_pages_count = 0
         self.output_dir = os.path.join(os.path.expanduser("~"), "Desktop")
 
         style = ttk.Style(self.root)
         style.theme_use('clam')
         # Definir estilos para a barra de progresso
-        style.configure("Default.Horizontal.TProgressbar", troughcolor='white', background='green') # Barra verde durante o processamento
+        style.configure("Default.Horizontal.TProgressbar", troughcolor='white', background='green')
         style.configure("Success.Horizontal.TProgressbar", troughcolor='white', background='green')
         style.configure("Error.Horizontal.TProgressbar", troughcolor='white', background='red')
 
@@ -330,7 +330,7 @@ class AppCelescReporter:
 
         # --- Seção Log em Tempo Real (Inicializada mais cedo para evitar AttributeError) ---
         log_frame = ttk.LabelFrame(main_frame, text="Log de Processamento", padding="10")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=5) # Empacotado antes de ser referenciado
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, height=10, state=tk.DISABLED)
         self.log_text.pack(fill=tk.BOTH, expand=True)
@@ -341,7 +341,7 @@ class AppCelescReporter:
         self.log_text.tag_config("SUCCESS", foreground="green")
         self.log_text.tag_config("DEBUG", foreground="gray")
 
-        self.load_base_sheet() # Agora pode ser chamado sem erro, pois self.log_text existe
+        self.load_base_sheet()
 
         pdf_frame = ttk.LabelFrame(main_frame, text="Arquivos PDF das Faturas", padding="10")
         pdf_frame.pack(fill=tk.X, pady=5)
@@ -360,7 +360,6 @@ class AppCelescReporter:
         action_frame = ttk.Frame(main_frame, padding="10")
         action_frame.pack(fill=tk.X, pady=10)
 
-        # Configura a barra para usar o estilo "Default" (verde)
         self.progress_bar = ttk.Progressbar(action_frame, orient="horizontal", length=300, mode="determinate",
                                             style="Default.Horizontal.TProgressbar")
         self.progress_bar.pack(pady=5, fill=tk.X)
@@ -372,8 +371,8 @@ class AppCelescReporter:
         self.status_label.pack(fill=tk.X, pady=5)
 
         # --- Adição do botão de Informação "i" ---
-        self.show_info_button_canvas = create_rounded_button(self.root, "i", self.show_info, width=30, height=30, bg_color="#007bff", text_color="#FFFFFF")
-        self.show_info_button_canvas.place(relx=1.0, rely=1.0, x=-10, y=-10, anchor="se") # Posicionamento no canto inferior direito
+        self.show_info_button_canvas = create_rounded_button(self.root, "i", self.show_info, width=25, height=25, bg_color="#007bff", text_color="#FFFFFF")
+        self.show_info_button_canvas.place(relx=1.0, rely=1.0, x=-10, y=-10, anchor="se")
 
     def set_progress_bar_style(self, style_name):
         """Define o estilo visual da barra de progresso."""
@@ -384,22 +383,18 @@ class AppCelescReporter:
         self.log_text.insert(tk.END, f"[{level}] {message}\n", level.upper())
         self.log_text.config(state=tk.DISABLED)
         self.log_text.see(tk.END)
-        # Use root.update_idletasks() para garantir que a GUI seja atualizada imediatamente
         # self.root.update_idletasks() # Pode causar lentidão se chamado muitas vezes em loop
 
     def update_progress(self, pages_processed):
         """Atualiza a barra de progresso e o status label."""
         self.processed_pages_count += pages_processed
         current_progress = self.processed_pages_count
-        total_steps = self.total_pages_to_process # Usamos o total de páginas como total de steps
+        total_steps = self.total_pages_to_process
 
-        # Garante que o valor não exceda o máximo
         if current_progress > total_steps:
             current_progress = total_steps
 
-        # Agendamos a atualização na thread principal usando root.after
         self.root.after(0, lambda: self.progress_bar.config(value=current_progress))
-        # Atualiza o status com base no número de páginas processadas
         self.root.after(0, lambda: self.status_label.config(text=f"Processando página {current_progress}/{total_steps}..."))
 
 
@@ -506,26 +501,23 @@ class AppCelescReporter:
                         self.total_pages_to_process += len(pdf.pages)
                 except Exception as e:
                     self.log_message(f"AVISO: Não foi possível contar páginas em {os.path.basename(pdf_path)}: {e}", "WARNING")
-                    # Se der erro ao contar, ainda assim adicionamos 1 para não travar a barra se for um PDF inválido
                     self.total_pages_to_process += 1
             self.log_message(f"Total de páginas a processar: {self.total_pages_to_process}", "INFO")
         except Exception as e:
             self.log_message(f"Erro ao calcular total de páginas: {e}. Usando contagem mínima (1 por PDF).", "ERROR")
-            # Em caso de erro na contagem inicial, define um mínimo para não travar
             self.total_pages_to_process = max(1, len(self.pdf_files))
 
 
         # --- Preparar a barra de progresso e iniciar a thread ---
-        self.processed_pages_count = 0 # Resetar o contador de páginas processadas
+        self.processed_pages_count = 0
         self.status_label.config(text=f"Preparando para processar {self.total_pages_to_process} páginas...")
-        self.process_button.config(state=tk.DISABLED) # Desabilita o botão enquanto processa
+        self.process_button.config(state=tk.DISABLED)
         self.progress_bar["value"] = 0
         self.progress_bar["maximum"] = self.total_pages_to_process
-        self.set_progress_bar_style("Default.Horizontal.TProgressbar") # Define a cor verde para iniciar
+        self.set_progress_bar_style("Default.Horizontal.TProgressbar")
 
-        self.root.update_idletasks() # Garante que a GUI seja atualizada antes da thread iniciar
+        self.root.update_idletasks()
 
-        # Inicia o processamento real em uma thread separada
         processing_thread = threading.Thread(target=self._actual_processing_task)
         processing_thread.start()
 
@@ -533,28 +525,24 @@ class AppCelescReporter:
         """Contém o loop principal de processamento de PDF, executa em uma thread separada."""
         all_extracted_data = []
         error_items = []
-        erros_encontrados_no_processamento = False # Flag para verificar erros
+        erros_encontrados_no_processamento = False
 
-        # Atualizações iniciais da GUI via root.after para garantir que rodem na thread principal
         self.root.after(0, lambda: self.progress_bar.config(value=0, maximum=self.total_pages_to_process))
         self.root.after(0, lambda: self.status_label.config(text=f"Iniciando processamento de {self.total_pages_to_process} páginas..."))
-        self.root.after(0, lambda: self.set_progress_bar_style("Default.Horizontal.TProgressbar")) # Garante que a barra comece verde
+        self.root.after(0, lambda: self.set_progress_bar_style("Default.Horizontal.TProgressbar"))
 
         self.log_message(f"Iniciando processamento de {len(self.pdf_files)} PDFs ({self.total_pages_to_process} páginas totais)...", "INFO")
 
-        # Iterar sobre cada PDF
         for pdf_path in self.pdf_files:
             pdf_name = os.path.basename(pdf_path)
             self.log_message(f"Processando PDF: {pdf_name}", "INFO")
 
-            # Chama process_pdf_file, passando o callback de progresso
             results_from_pdf = process_pdf_file(pdf_path, self.df_base, self.log_message, self.update_progress)
 
             for item in results_from_pdf:
                 if isinstance(item, dict):
                     if "error" in item:
-                        erros_encontrados_no_processamento = True # Define a flag se encontrar um erro
-                        # Adapta a estrutura de erro para as novas colunas
+                        erros_encontrados_no_processamento = True
                         error_item = {
                             "UC": item.get("UC", "N/A"),
                             "Centro de Custo": "ERRO",
@@ -571,14 +559,12 @@ class AppCelescReporter:
                     else:
                         all_extracted_data.append(item)
 
-        # Após o loop, agenda a finalização na thread principal, passando a flag de erros
         self.root.after(0, lambda: self._processing_complete(all_extracted_data, error_items, erros_encontrados_no_processamento))
 
 
     def _processing_complete(self, all_extracted_data, error_items, erros_encontrados_no_processamento):
         """Finaliza o processamento, cria o relatório Excel e atualiza a GUI."""
 
-        # Define a ordem desejada das colunas para o relatório final (DADOS)
         final_columns_order_data = [
             "UC", "Centro de Custo", "Subseção",
             "ENERGIA (R$)",
@@ -588,7 +574,6 @@ class AppCelescReporter:
             "LÍQUIDO (R$)",
             "Numero da Pagina"
         ]
-        # Define a ordem desejada das colunas para o relatório de erros
         final_columns_order_errors = [
             "UC", "Centro de Custo", "Subseção",
             "ENERGIA (R$)",
@@ -600,7 +585,6 @@ class AppCelescReporter:
             "Observação"
         ]
 
-        # Lista de colunas que devem ser formatadas como moeda no Excel
         currency_cols_names_for_excel_fmt = [
             "ENERGIA (R$)",
             "COSIP (R$)",
@@ -612,15 +596,13 @@ class AppCelescReporter:
         df_report_data = pd.DataFrame(all_extracted_data)
 
         if not df_report_data.empty:
-            # Garante que todas as colunas desejadas existam, adicionando-as se estiverem faltando
             for col in final_columns_order_data:
                 if col not in df_report_data.columns:
                      df_report_data[col] = pd.NA
-            df_report_data = df_report_data[final_columns_order_data] # Reordena as colunas
+            df_report_data = df_report_data[final_columns_order_data]
 
-            # Converte colunas de moeda para numérico e preenche NaNs com 0.0
             for col_name in currency_cols_names_for_excel_fmt:
-                if col_name in df_report_data.columns: # Verifica se a coluna existe no DataFrame
+                if col_name in df_report_data.columns:
                     df_report_data[col_name] = pd.to_numeric(df_report_data[col_name], errors='coerce')
                     df_report_data[col_name] = df_report_data[col_name].fillna(0.0)
         else:
@@ -629,12 +611,11 @@ class AppCelescReporter:
         df_errors = pd.DataFrame()
         if error_items:
             df_errors = pd.DataFrame(error_items)
-            # Garante que todas as colunas desejadas existam, adicionando-as se estiverem faltando
             for col in final_columns_order_errors:
                  if col not in df_errors.columns:
                     default_value = "" if col == "Observação" else (0.0 if col in currency_cols_names_for_excel_fmt else "N/A")
                     df_errors[col] = default_value
-            df_errors = df_errors[final_columns_order_errors] # Reordena as colunas
+            df_errors = df_errors[final_columns_order_errors]
         else:
              df_errors = pd.DataFrame(columns=final_columns_order_errors)
 
@@ -648,13 +629,10 @@ class AppCelescReporter:
                     workbook = writer.book
                     worksheet = writer.sheets['Relatorio_Dados_Extraidos']
 
-                    # --- ADIÇÃO: Congela a primeira linha para dados extraídos ---
-                    worksheet.freeze_panes = 'A2' # Congela a primeira linha
+                    worksheet.freeze_panes = 'A2'
 
-                    # Aplica formato de moeda
                     for col_name_df in currency_cols_names_for_excel_fmt:
-                        if col_name_df in df_report_data.columns: # Verifica se a coluna existe no DataFrame
-                            # Encontra o índice da coluna Excel com base em final_columns_order_data
+                        if col_name_df in df_report_data.columns:
                             excel_col_idx = final_columns_order_data.index(col_name_df) + 1
                             col_letter = get_column_letter(excel_col_idx)
                             for row_num in range(2, worksheet.max_row + 1):
@@ -662,8 +640,7 @@ class AppCelescReporter:
                                 if cell.value is not None and isinstance(cell.value, (int, float)):
                                     cell.number_format = 'R$ #,##0.00'
 
-                    # Ajusta a largura das colunas para Relatorio_Dados_Extraidos
-                    for col_idx_df, col_name_df in enumerate(final_columns_order_data): # Usa final_columns_order_data para indexação correta
+                    for col_idx_df, col_name_df in enumerate(final_columns_order_data):
                         excel_col_idx = col_idx_df + 1
                         column_letter_val = get_column_letter(excel_col_idx)
                         max_len = 0
@@ -675,7 +652,6 @@ class AppCelescReporter:
                             if cell.value is not None:
                                 cell_str_val = ""
                                 if col_name_df in currency_cols_names_for_excel_fmt and isinstance(cell.value, (int, float)):
-                                    # Formata para cálculo de comprimento, correspondendo ao formato R$ do Excel
                                     formatted_value_for_len = f"R$ {cell.value:_.2f}".replace('.',',').replace('_','.')
                                     if cell.value < 0:
                                          formatted_value_for_len = f"-R$ {abs(cell.value):_.2f}".replace('.',',').replace('_','.')
@@ -689,11 +665,9 @@ class AppCelescReporter:
                 if not df_errors.empty:
                     df_errors.to_excel(writer, index=False, sheet_name='Relatorio_Erros')
                     worksheet_errors = writer.sheets['Relatorio_Erros']
-                    # --- ADIÇÃO: Congela a primeira linha para erros ---
-                    worksheet_errors.freeze_panes = 'A2' # Congela a primeira linha
+                    worksheet_errors.freeze_panes = 'A2'
 
-                    # Ajusta a largura das colunas para Relatorio_Erros
-                    for col_idx_df, col_name_df in enumerate(final_columns_order_errors): # Usa final_columns_order_errors
+                    for col_idx_df, col_name_df in enumerate(final_columns_order_errors):
                         excel_col_idx = col_idx_df + 1
                         column_letter_val = get_column_letter(excel_col_idx)
                         max_len = len(str(worksheet_errors[f'{column_letter_val}1'].value))
@@ -703,16 +677,15 @@ class AppCelescReporter:
                                 max_len = max(max_len, len(str(cell.value)))
                         adjusted_width = (max_len + 2) if max_len > 0 else 12
                         if col_name_df == "Observação":
-                            adjusted_width = min(adjusted_width, 80) # Limita a largura para 'Observação'
+                            adjusted_width = min(adjusted_width, 80)
                         worksheet_errors.column_dimensions[column_letter_val].width = adjusted_width
 
 
             num_registros_extraidos = len(df_report_data)
             num_erros_reportados = len(df_errors)
 
-            # --- Atualiza a barra e status com base na flag de erros ---
             if erros_encontrados_no_processamento:
-                 self.set_progress_bar_style("Error.Horizontal.TProgressbar") # Cor vermelha
+                 self.set_progress_bar_style("Error.Horizontal.TProgressbar")
                  self.status_label.config(text="Concluído com ERROS.")
                  summary_message = f"Processamento concluído com ERROS!\n"
                  if num_registros_extraidos > 0:
@@ -721,20 +694,19 @@ class AppCelescReporter:
                  self.log_message(f"Processamento concluído com {num_erros_reportados} problemas/erros.", "WARNING")
                  messagebox.showwarning("Processamento Concluído com Alertas", summary_message + f"\nRelatório salvo em:\n{output_file_path}")
             elif num_registros_extraidos == 0:
-                self.set_progress_bar_style("Error.Horizontal.TProgressbar") # Cor vermelha se nenhum dado foi extraído
+                self.set_progress_bar_style("Error.Horizontal.TProgressbar")
                 summary_message = "Processamento concluído. Nenhum dado de fatura válido foi extraído.\nVerifique se selecionou PDFs e se eles contêm faturas individuais com UCs identificáveis (além da página de sumário)."
                 self.status_label.config(text="Concluído (Sem dados extraídos).")
                 self.log_message(summary_message, "INFO")
                 messagebox.showinfo("Processamento Concluído", summary_message)
             else:
-                self.set_progress_bar_style("Success.Horizontal.TProgressbar") # Cor verde
+                self.set_progress_bar_style("Success.Horizontal.TProgressbar")
                 self.status_label.config(text="Concluído com sucesso!")
                 summary_message = f"Processamento concluído com sucesso!\n{num_registros_extraidos} registros de fatura extraídos na aba 'Relatorio_Dados_Extraidos'."
                 self.log_message("Processamento concluído com sucesso!", "SUCCESS")
                 messagebox.showinfo("Processamento Concluído", summary_message + f"\nRelatório salvo em:\n{output_file_path}")
 
 
-            # Abre o arquivo após salvar
             if os.path.exists(output_file_path):
                 try:
                     if sys.platform == "win32":
@@ -747,12 +719,12 @@ class AppCelescReporter:
                     self.log_message(f"Não foi possível abrir o relatório automaticamente: {open_e}", "WARNING")
 
         except Exception as e:
-            self.set_progress_bar_style("Error.Horizontal.TProgressbar") # Cor vermelha em caso de erro ao salvar
+            self.set_progress_bar_style("Error.Horizontal.TProgressbar")
             self.log_message(f"Erro CRÍTICO ao salvar o relatório Excel: {e}", "CRITICAL_ERROR")
             messagebox.showerror("Erro ao Salvar", f"Não foi possível salvar o relatório Excel: {e}")
             self.status_label.config(text="Erro ao salvar relatório.")
         finally:
-            self.process_button.config(state=tk.NORMAL) # Reabilita o botão
+            self.process_button.config(state=tk.NORMAL)
 
     def show_info(self):
         """
@@ -761,32 +733,34 @@ class AppCelescReporter:
         """
         info_popup = Toplevel(self.root)
         info_popup.title("Informação")
-        info_popup.transient(self.root) # Define a janela principal como "pai"
-        info_popup.grab_set() # Bloqueia interação com a janela principal
+        info_popup.transient(self.root)
+        info_popup.grab_set()
         info_popup.resizable(False, False)
-        info_popup.configure(bg="#f0f0f0") # Cor de fundo padrão
+        info_popup.configure(bg="#f0f0f0")
 
-        # Frame principal para conteúdo
+        # --- ADIÇÃO: Definir ícone para o Toplevel window ---
+        if os.path.exists(self.icon_path):
+            try:
+                info_popup.iconbitmap(self.icon_path)
+            except tk.TclError as e:
+                print(f"Erro ao carregar ícone para o popup: {e}")
+        # --- FIM DA ADIÇÃO ---
+
         content_frame = Frame(info_popup, padx=15, pady=15, bg=info_popup.cget("bg"))
-        content_frame.pack(expand=True, fill=tk.BOTH) # Usa tk.BOTH para fill
+        content_frame.pack(expand=True, fill=tk.BOTH)
 
         version_label = Label(content_frame, text=f"{self.root.title()} - by Elias", font=("Segoe UI", 10), bg=content_frame.cget("bg"), fg="#002b00")
         version_label.pack(pady=(0,5))
         pix_label = Label(content_frame, text="Chamado via mensagem Pix: eliasgkersten@gmail.com", font=("Segoe UI", 10), bg=content_frame.cget("bg"), fg="#002b00")
         pix_label.pack(pady=5)
 
-        # Botão para fechar o popup
         close_button = ttk.Button(content_frame, text="OK", command=info_popup.destroy)
         close_button.pack(pady=10)
 
-
-        # Para centralizar o popup após a criação
-        # Usa o método center_window existente, mas precisa calcular a largura/altura do popup
-        # Uma forma simples é forçar uma atualização e então pegar as dimensões
         info_popup.update_idletasks()
         popup_width = info_popup.winfo_width()
         popup_height = info_popup.winfo_height()
-        self.center_window_for_popup(info_popup, popup_width, popup_height) # Usa um método auxiliar para centralizar popup
+        self.center_window_for_popup(info_popup, popup_width, popup_height)
 
     def center_window_for_popup(self, window_to_center, width, height):
         """Centraliza uma janela (como um popup) na tela."""
