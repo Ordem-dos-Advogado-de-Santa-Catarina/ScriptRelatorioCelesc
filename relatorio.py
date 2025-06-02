@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, filedialog, messagebox, scrolledtext, Canvas, Toplevel, Label, Frame # Adicionado Canvas, Toplevel, Label, Frame
 import pandas as pd
 import re
 import os
@@ -264,12 +264,23 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback): # Adici
 
     return results_for_this_pdf
 
+# --- Função para criar botões arredondados (copiado de PDF2EXCEL.py) ---
+def create_rounded_button(parent, text, command, width=30, height=30, bg_color="#007bff", text_color="#FFFFFF"):
+    canvas = Canvas(parent, width=width, height=height, bd=0, highlightthickness=0, relief='ridge', bg=parent.cget("bg"))
+    # Desenha o círculo/oval
+    # As coordenadas são (x1, y1, x2, y2) para o retângulo que circunscreve o oval
+    # Adiciona uma pequena margem para a borda não ser cortada
+    oval_id = canvas.create_oval(2, 2, width-2, height-2, outline=bg_color, fill=bg_color)
+    # Adiciona o texto no centro
+    text_id = canvas.create_text(width/2, height/2, text=text, fill=text_color, font=("Segoe UI Bold", int(height/2.5)))
+    canvas.bind("<Button-1>", lambda event: command())
+    return canvas
 
 # --- Classe da Interface Gráfica ---
 class AppCelescReporter:
     def __init__(self, root_window):
         self.root = root_window
-        self.root.title("Gerador de Relatório Celesc")
+        self.root.title("Gerador de Relatório Celesc - ver 0.5a")
         self.center_window(700, 650)
 
         if getattr(sys, 'frozen', False):
@@ -359,6 +370,10 @@ class AppCelescReporter:
 
         self.status_label = ttk.Label(action_frame, text="Aguardando configuração...")
         self.status_label.pack(fill=tk.X, pady=5)
+
+        # --- Adição do botão de Informação "i" ---
+        self.show_info_button_canvas = create_rounded_button(self.root, "i", self.show_info, width=30, height=30, bg_color="#007bff", text_color="#FFFFFF")
+        self.show_info_button_canvas.place(relx=1.0, rely=1.0, x=-10, y=-10, anchor="se") # Posicionamento no canto inferior direito
 
     def set_progress_bar_style(self, style_name):
         """Define o estilo visual da barra de progresso."""
@@ -738,6 +753,48 @@ class AppCelescReporter:
             self.status_label.config(text="Erro ao salvar relatório.")
         finally:
             self.process_button.config(state=tk.NORMAL) # Reabilita o botão
+
+    def show_info(self):
+        """
+        Abre um pop-up com informações sobre o programa,
+        sem os botões de log/debug/configuração.
+        """
+        info_popup = Toplevel(self.root)
+        info_popup.title("Informação")
+        info_popup.transient(self.root) # Define a janela principal como "pai"
+        info_popup.grab_set() # Bloqueia interação com a janela principal
+        info_popup.resizable(False, False)
+        info_popup.configure(bg="#f0f0f0") # Cor de fundo padrão
+
+        # Frame principal para conteúdo
+        content_frame = Frame(info_popup, padx=15, pady=15, bg=info_popup.cget("bg"))
+        content_frame.pack(expand=True, fill=tk.BOTH) # Usa tk.BOTH para fill
+
+        version_label = Label(content_frame, text=f"{self.root.title()} - by Elias", font=("Segoe UI", 10), bg=content_frame.cget("bg"), fg="#002b00")
+        version_label.pack(pady=(0,5))
+        pix_label = Label(content_frame, text="Chamado via mensagem Pix: eliasgkersten@gmail.com", font=("Segoe UI", 10), bg=content_frame.cget("bg"), fg="#002b00")
+        pix_label.pack(pady=5)
+
+        # Botão para fechar o popup
+        close_button = ttk.Button(content_frame, text="OK", command=info_popup.destroy)
+        close_button.pack(pady=10)
+
+
+        # Para centralizar o popup após a criação
+        # Usa o método center_window existente, mas precisa calcular a largura/altura do popup
+        # Uma forma simples é forçar uma atualização e então pegar as dimensões
+        info_popup.update_idletasks()
+        popup_width = info_popup.winfo_width()
+        popup_height = info_popup.winfo_height()
+        self.center_window_for_popup(info_popup, popup_width, popup_height) # Usa um método auxiliar para centralizar popup
+
+    def center_window_for_popup(self, window_to_center, width, height):
+        """Centraliza uma janela (como um popup) na tela."""
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = (screen_width/2) - (width/2)
+        y = (screen_height/2) - (height/2)
+        window_to_center.geometry(f'{width}x{height}+{int(x)}+{int(y)}')
 
 
 if __name__ == "__main__":
