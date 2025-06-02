@@ -633,6 +633,9 @@ class AppCelescReporter:
                     workbook = writer.book
                     worksheet = writer.sheets['Relatorio_Dados_Extraidos']
 
+                    # --- ADIÇÃO: Congela a primeira linha para dados extraídos ---
+                    worksheet.freeze_panes = 'A2' # Congela a primeira linha
+
                     # Aplica formato de moeda
                     for col_name_df in currency_cols_names_for_excel_fmt:
                         if col_name_df in df_report_data.columns: # Verifica se a coluna existe no DataFrame
@@ -671,6 +674,9 @@ class AppCelescReporter:
                 if not df_errors.empty:
                     df_errors.to_excel(writer, index=False, sheet_name='Relatorio_Erros')
                     worksheet_errors = writer.sheets['Relatorio_Erros']
+                    # --- ADIÇÃO: Congela a primeira linha para erros ---
+                    worksheet_errors.freeze_panes = 'A2' # Congela a primeira linha
+
                     # Ajusta a largura das colunas para Relatorio_Erros
                     for col_idx_df, col_name_df in enumerate(final_columns_order_errors): # Usa final_columns_order_errors
                         excel_col_idx = col_idx_df + 1
