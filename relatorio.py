@@ -196,7 +196,7 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback): # Adici
                 results_for_this_pdf.append({"error": error_msg, "Numero da Pagina": pdf_filename}) # Chave alterada para erro
                 # Chamar callback de progresso mesmo para PDFs vazios para contabilizá-los
                 if progress_callback:
-                    progress_callback(len(pdf.pages)) # Passa 0 se não houver páginas
+                    progress_callback(0) # Passa 0 se não houver páginas, mas ainda assim avança o contador total do PDF
                 return results_for_this_pdf
 
             total_pages_in_pdf = len(pdf.pages)
@@ -254,13 +254,14 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback): # Adici
         critical_error_msg = f"Erro crítico ao processar {pdf_filename}: {e}"
         logger_func(critical_error_msg, "CRITICAL_ERROR")
         results_for_this_pdf.append({"error": critical_error_msg, "Numero da Pagina": pdf_filename, "UC": "N/A"}) # Chave alterada para erro
-        # Chamar callback de progresso para o PDF que deu erro
+        # Chamar callback de progresso para o PDF que deu erro, avançando todas as páginas esperadas
         if progress_callback:
            try: # Tenta contar as páginas para avançar a barra
                with pdfplumber.open(pdf_path) as pdf_err:
-                    progress_callback(len(pdf_err.pages))
+                    progress_callback(len(pdf_err.pages) - (page_num + 1 if 'page_num' in locals() else 0)) # Avança o restante das páginas
            except Exception: # Se não conseguir contar, avança 1 step para não travar a barra
-                progress_callback(1)
+                progress_callback(1) # Fallback, may not be accurate but keeps progress moving
+
 
     return results_for_this_pdf
 
@@ -283,6 +284,9 @@ class AppCelescReporter:
         self.root = root_window
         self.root.title("Gerador de Relatório Celesc - ver 0.5a")
         self.center_window(700, 650)
+        # --- Adição para tornar a janela não redimensionável ---
+        self.root.resizable(False, False)
+        # --- Fim da adição ---
 
         if getattr(sys, 'frozen', False):
              basedir = os.path.dirname(sys.executable)
@@ -329,6 +333,7 @@ class AppCelescReporter:
         base_frame.pack(fill=tk.X, pady=5)
 
         # Torna o label clicável
+        # Ajustar wraplength se 650 for maior que a largura interna do frame com 700 de janela
         self.base_path_label = ttk.Label(base_frame, text=f"Caminho: {self.base_sheet_path}", wraplength=650, cursor="hand2")
         self.base_path_label.pack(fill=tk.X)
         self.base_path_label.bind("<Button-1>", lambda e: self.open_base_sheet_folder())
@@ -407,12 +412,18 @@ class AppCelescReporter:
         current_progress = self.processed_pages_count
         total_steps = self.total_pages_to_process
 
+        # Garante que o valor não ultrapasse o máximo
         if current_progress > total_steps:
-            current_progress = total_steps
+             current_progress = total_steps
+             # Pode adicionar um log aqui se isso acontecer inesperadamente
+             # self.log_message(f"Aviso: Progresso {current_progress} excedeu total {total_steps}.", "WARNING")
+
 
         # Use root.after para atualizar a GUI a partir da thread secundária
         self.root.after(0, lambda: self.progress_bar.config(value=current_progress))
-        self.root.after(0, lambda: self.status_label.config(text=f"Processando página {current_progress}/{total_steps}..."))
+        # Atualiza o status label apenas para páginas processadas, não para cada PDF iniciado
+        if pages_processed > 0 or current_progress == total_steps:
+            self.root.after(0, lambda: self.status_label.config(text=f"Processando página {current_progress}/{total_steps}..."))
 
 
     def center_window(self, width, height):
@@ -533,18 +544,16 @@ class AppCelescReporter:
         # --- Calcular o total de páginas antes de iniciar o processamento real ---
         self.total_pages_to_process = 0
         self.log_message("Contando total de páginas nos PDFs...", "INFO")
-        try:
-            for pdf_path in self.pdf_files:
-                try:
-                    with pdfplumber.open(pdf_path) as pdf:
-                        self.total_pages_to_process += len(pdf.pages)
-                except Exception as e:
-                    self.log_message(f"AVISO: Não foi possível contar páginas em {os.path.basename(pdf_path)}: {e}", "WARNING")
-                    self.total_pages_to_process += 1 # Assume 1 página se der erro ao abrir
-            self.log_message(f"Total de páginas a processar: {self.total_pages_to_process}", "INFO")
-        except Exception as e:
-            self.log_message(f"Erro ao calcular total de páginas: {e}. Usando contagem mínima (1 por PDF).", "ERROR")
-            self.total_pages_to_process = max(1, len(self.pdf_files))
+        temp_total_pages = 0
+        for pdf_path in self.pdf_files:
+            try:
+                with pdfplumber.open(pdf_path) as pdf:
+                    temp_total_pages += len(pdf.pages)
+            except Exception as e:
+                self.log_message(f"AVISO: Não foi possível contar páginas em {os.path.basename(pdf_path)}: {e}. Assumindo 1 página para o progresso.", "WARNING")
+                temp_total_pages += 1 # Assume 1 página para manter o progresso avançando
+        self.total_pages_to_process = max(1, temp_total_pages) # Garante que o total seja pelo menos 1 se não houver PDFs ou houver erros na contagem
+        self.log_message(f"Total de páginas a processar: {self.total_pages_to_process}", "INFO")
 
 
         # --- Preparar a barra de progresso e iniciar a thread ---
@@ -571,7 +580,7 @@ class AppCelescReporter:
         self.root.after(0, lambda: self.status_label.config(text=f"Iniciando processamento de {self.total_pages_to_process} páginas..."))
         self.root.after(0, lambda: self.set_progress_bar_style("Default.Horizontal.TProgressbar"))
 
-        self.log_message(f"Iniciando processamento de {len(self.pdf_files)} PDFs ({self.total_pages_to_process} páginas totais)...", "INFO")
+        self.log_message(f"Iniciando processamento de {len(self.pdf_files)} PDFs ({self.total_pages_to_process} páginas totais estimadas)...", "INFO")
 
         for pdf_path in self.pdf_files:
             pdf_name = os.path.basename(pdf_path)
@@ -599,7 +608,12 @@ class AppCelescReporter:
                     else:
                         all_extracted_data.append(item)
 
-        self.root.after(0, lambda: self._processing_complete(all_extracted_data, error_items, erros_encontrados_no_processamento))
+        # Garantir que a barra chegue a 100% mesmo se a contagem inicial for imprecisa
+        self.root.after(0, lambda: self.progress_bar.config(value=self.total_pages_to_process))
+        self.root.after(0, lambda: self.status_label.config(text=f"Processamento concluído! Gerando relatório..."))
+
+
+        self.root.after(100, lambda: self._processing_complete(all_extracted_data, error_items, erros_encontrados_no_processamento)) # Pequeno delay para a barra atingir 100%
 
 
     def _processing_complete(self, all_extracted_data, error_items, erros_encontrados_no_processamento):
@@ -658,6 +672,7 @@ class AppCelescReporter:
             df_errors = df_errors[final_columns_order_errors]
         else:
              df_errors = pd.DataFrame(columns=final_columns_order_errors)
+
 
         output_file_path = os.path.join(self.output_dir, "Relatorio_Celesc.xlsx")
 
@@ -775,7 +790,7 @@ class AppCelescReporter:
         info_popup.title("Informação")
         info_popup.transient(self.root)
         info_popup.grab_set()
-        info_popup.resizable(False, False)
+        info_popup.resizable(False, False) # Pop-up também fixo
         info_popup.configure(bg="#f0f0f0")
 
         # --- ADIÇÃO: Definir ícone para o Toplevel window ---
