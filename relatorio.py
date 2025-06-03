@@ -264,9 +264,12 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback): # Adici
 
     return results_for_this_pdf
 
-# Função para criar botões arredondados (AGORA COM O ESTILO NOVO)
-def create_rounded_button(parent, text, command, width=20, height=20):
-    canvas = Canvas(parent, width=width, height=height, bd=0, highlightthickness=0, relief='ridge', bg=parent.cget("bg"))
+# Função para criar botões arredondados
+def create_rounded_button(parent, text, command, width=20, height=20, bg_color=None):
+    # Usa bg_color se fornecido, caso contrário, fallback para o bg do parent
+    # Definindo a cor de fundo do Canvas para a cor do tema da interface
+    canvas_bg = bg_color if bg_color else parent.cget("bg")
+    canvas = Canvas(parent, width=width, height=height, bd=0, highlightthickness=0, relief='ridge', bg=canvas_bg)
     # Desenha o círculo azul (hardcoded para o estilo desejado)
     canvas.create_oval(1, 1, width-2, height-2, outline="#0000FF", fill="#0000FF")
     # Adiciona o texto branco no centro (hardcoded para o estilo desejado)
@@ -315,6 +318,9 @@ class AppCelescReporter:
         style.configure("Success.Horizontal.TProgressbar", troughcolor='white', background='green')
         style.configure("Error.Horizontal.TProgressbar", troughcolor='white', background='red')
 
+        # >>> MODIFICAÇÃO AQUI: Obter a cor de fundo do tema para ttk.Frame
+        self.theme_background_color = style.lookup('TFrame', 'background')
+        # <<< FIM DA MODIFICAÇÃO
 
         main_frame = ttk.Frame(self.root, padding="10 10 10 10")
         main_frame.pack(expand=True, fill=tk.BOTH)
@@ -372,8 +378,10 @@ class AppCelescReporter:
         self.status_label = ttk.Label(action_frame, text="Aguardando configuração...")
         self.status_label.pack(fill=tk.X, pady=5)
 
-        # Botão de Informação "i" (estilo NOVO azul redondo, sem passar as cores explicitamente aqui)
-        show_info_button_canvas = create_rounded_button(root, "i", self.show_info, width=20, height=20)
+        # Botão de Informação "i" (estilo NOVO azul redondo)
+        # >>> MODIFICAÇÃO AQUI: Passa self.theme_background_color para a função create_rounded_button
+        show_info_button_canvas = create_rounded_button(root, "i", self.show_info, width=20, height=20, bg_color=self.theme_background_color)
+        # <<< FIM DA MODIFICAÇÃO
         # Posicionamento do botão de informação no canto inferior direito
         show_info_button_canvas.place(relx=1.0, rely=1.0, x=-10, y=-10, anchor="se") # x e y negativos para dar uma margem da borda
 
@@ -761,7 +769,7 @@ class AppCelescReporter:
         info_popup.transient(self.root)
         info_popup.grab_set()
         info_popup.resizable(False, False)
-        info_popup.configure(bg="#f0f0f0")
+        info_popup.configure(bg="#f0f0f0") 
 
         # --- ADIÇÃO: Definir ícone para o Toplevel window ---
         if os.path.exists(self.icon_path):
@@ -771,7 +779,7 @@ class AppCelescReporter:
                 print(f"Erro ao carregar ícone para o popup: {e}")
         # --- FIM DA ADIÇÃO ---
 
-        content_frame = Frame(info_popup, padx=15, pady=15, bg=info_popup.cget("bg"))
+        content_frame = Frame(info_popup, padx=15, pady=15, bg=info_popup.cget("bg")) 
         content_frame.pack(expand=True, fill=tk.BOTH)
 
         version_label = Label(content_frame, text=f"{self.root.title()} - by Elias", font=("Segoe UI", 10), bg=content_frame.cget("bg"), fg="#002b00")
