@@ -271,7 +271,6 @@ def create_rounded_button(parent, text, command, width=30, height=30, bg_color="
     # As coordenadas são (x1, y1, x2, y2) para o retângulo que circunscreve o oval
     # Adiciona uma pequena margem para a borda não ser cortada
     oval_id = canvas.create_oval(2, 2, width-2, height-2, outline=bg_color, fill=bg_color)
-    # Adiciona o texto no centro
     text_id = canvas.create_text(width/2, height/2, text=text, fill=text_color, font=("Segoe UI Bold", int(height/2.5)))
     canvas.bind("<Button-1>", lambda event: command())
     return canvas
@@ -323,8 +322,12 @@ class AppCelescReporter:
 
         base_frame = ttk.LabelFrame(main_frame, text="Planilha Base de UCs", padding="10")
         base_frame.pack(fill=tk.X, pady=5)
-        self.base_path_label = ttk.Label(base_frame, text=f"Caminho: {self.base_sheet_path}", wraplength=650)
+        
+        # MODIFICAÇÃO AQUI: Torna o label clicável
+        self.base_path_label = ttk.Label(base_frame, text=f"Caminho: {self.base_sheet_path}", wraplength=650, cursor="hand2")
         self.base_path_label.pack(fill=tk.X)
+        self.base_path_label.bind("<Button-1>", lambda e: self.open_base_sheet_folder())
+        
         self.base_status_label = ttk.Label(base_frame, text="Status: Não carregada")
         self.base_status_label.pack(fill=tk.X)
 
@@ -443,6 +446,28 @@ class AppCelescReporter:
             self.base_status_label.config(text=msg, foreground="red")
             self.log_message(msg, "CRITICAL_ERROR")
             self.df_base = None
+
+    def open_base_sheet_folder(self):
+        """Abre o diretório onde a planilha base está localizada."""
+        if not os.path.exists(self.base_sheet_path):
+            self.log_message(f"Caminho da planilha base não encontrado para abrir: {self.base_sheet_path}", "ERROR")
+            messagebox.showerror("Erro", "Arquivo da planilha base não encontrado.")
+            return
+
+        folder_path = os.path.dirname(self.base_sheet_path)
+        
+        self.log_message(f"Abrindo pasta da planilha base: {folder_path}", "INFO")
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder_path)
+            elif sys.platform == "darwin": # macOS
+                subprocess.call(("open", folder_path))
+            else: # linux variants
+                subprocess.call(("xdg-open", folder_path))
+        except Exception as e:
+            self.log_message(f"Erro ao tentar abrir o diretório '{folder_path}': {e}", "ERROR")
+            messagebox.showerror("Erro ao Abrir Pasta", f"Não foi possível abrir a pasta:\n{folder_path}\nErro: {e}")
+
 
     def select_pdfs(self):
         """Permite ao usuário selecionar múltiplos arquivos PDF."""
