@@ -318,27 +318,27 @@ class AppCelescReporter:
         style.configure("Success.Horizontal.TProgressbar", troughcolor='white', background='green')
         style.configure("Error.Horizontal.TProgressbar", troughcolor='white', background='red')
 
-        # >>> MODIFICAÇÃO AQUI: Obter a cor de fundo do tema para ttk.Frame
+        # Obter a cor de fundo do tema para ttk.Frame
         self.theme_background_color = style.lookup('TFrame', 'background')
-        # <<< FIM DA MODIFICAÇÃO
 
         main_frame = ttk.Frame(self.root, padding="10 10 10 10")
         main_frame.pack(expand=True, fill=tk.BOTH)
 
+        # --- 1. Planilha Base de UCs ---
         base_frame = ttk.LabelFrame(main_frame, text="Planilha Base de UCs", padding="10")
         base_frame.pack(fill=tk.X, pady=5)
-        
-        # MODIFICAÇÃO AQUI: Torna o label clicável
+
+        # Torna o label clicável
         self.base_path_label = ttk.Label(base_frame, text=f"Caminho: {self.base_sheet_path}", wraplength=650, cursor="hand2")
         self.base_path_label.pack(fill=tk.X)
         self.base_path_label.bind("<Button-1>", lambda e: self.open_base_sheet_folder())
-        
+
         self.base_status_label = ttk.Label(base_frame, text="Status: Não carregada")
         self.base_status_label.pack(fill=tk.X)
 
-        # --- Seção Log em Tempo Real (Inicializada mais cedo para evitar AttributeError) ---
+        # --- Seção Log em Tempo Real (Criada cedo para evitar AttributeError) ---
+        # A criação do log_frame e log_text deve vir antes de load_base_sheet
         log_frame = ttk.LabelFrame(main_frame, text="Log de Processamento", padding="10")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, height=10, state=tk.DISABLED)
         self.log_text.pack(fill=tk.BOTH, expand=True)
@@ -351,6 +351,7 @@ class AppCelescReporter:
 
         self.load_base_sheet()
 
+        # --- 2. Arquivos PDF das Faturas ---
         pdf_frame = ttk.LabelFrame(main_frame, text="Arquivos PDF das Faturas", padding="10")
         pdf_frame.pack(fill=tk.X, pady=5)
         self.pdf_button = ttk.Button(pdf_frame, text="Selecionar PDFs da Celesc", command=self.select_pdfs)
@@ -358,6 +359,7 @@ class AppCelescReporter:
         self.pdf_label = ttk.Label(pdf_frame, text="Nenhum PDF selecionado")
         self.pdf_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # --- 3. Pasta de Saída do Relatório ---
         output_frame = ttk.LabelFrame(main_frame, text="Pasta de Saída do Relatório", padding="10")
         output_frame.pack(fill=tk.X, pady=5)
         self.output_dir_button = ttk.Button(output_frame, text="Definir Pasta de Saída", command=self.select_output_dir)
@@ -365,8 +367,12 @@ class AppCelescReporter:
         self.output_label = ttk.Label(output_frame, text=f"Padrão: {self.output_dir}")
         self.output_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # --- 4. Log de Processamento (Pack moved down) ---
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=5) # PACKED HERE NOW
+
+        # --- 5. Action Frame (Contains Progress Bar and Button) ---
         action_frame = ttk.Frame(main_frame, padding="10")
-        action_frame.pack(fill=tk.X, pady=10)
+        action_frame.pack(fill=tk.X, pady=10) # PACKED LAST
 
         self.progress_bar = ttk.Progressbar(action_frame, orient="horizontal", length=300, mode="determinate",
                                             style="Default.Horizontal.TProgressbar")
@@ -379,9 +385,8 @@ class AppCelescReporter:
         self.status_label.pack(fill=tk.X, pady=5)
 
         # Botão de Informação "i" (estilo NOVO azul redondo)
-        # >>> MODIFICAÇÃO AQUI: Passa self.theme_background_color para a função create_rounded_button
+        # Passa self.theme_background_color para a função create_rounded_button
         show_info_button_canvas = create_rounded_button(root, "i", self.show_info, width=20, height=20, bg_color=self.theme_background_color)
-        # <<< FIM DA MODIFICAÇÃO
         # Posicionamento do botão de informação no canto inferior direito
         show_info_button_canvas.place(relx=1.0, rely=1.0, x=-10, y=-10, anchor="se") # x e y negativos para dar uma margem da borda
 
@@ -405,6 +410,7 @@ class AppCelescReporter:
         if current_progress > total_steps:
             current_progress = total_steps
 
+        # Use root.after para atualizar a GUI a partir da thread secundária
         self.root.after(0, lambda: self.progress_bar.config(value=current_progress))
         self.root.after(0, lambda: self.status_label.config(text=f"Processando página {current_progress}/{total_steps}..."))
 
@@ -463,7 +469,7 @@ class AppCelescReporter:
             return
 
         folder_path = os.path.dirname(self.base_sheet_path)
-        
+
         self.log_message(f"Abrindo pasta da planilha base: {folder_path}", "INFO")
         try:
             if sys.platform == "win32":
@@ -534,7 +540,7 @@ class AppCelescReporter:
                         self.total_pages_to_process += len(pdf.pages)
                 except Exception as e:
                     self.log_message(f"AVISO: Não foi possível contar páginas em {os.path.basename(pdf_path)}: {e}", "WARNING")
-                    self.total_pages_to_process += 1
+                    self.total_pages_to_process += 1 # Assume 1 página se der erro ao abrir
             self.log_message(f"Total de páginas a processar: {self.total_pages_to_process}", "INFO")
         except Exception as e:
             self.log_message(f"Erro ao calcular total de páginas: {e}. Usando contagem mínima (1 por PDF).", "ERROR")
@@ -560,6 +566,7 @@ class AppCelescReporter:
         error_items = []
         erros_encontrados_no_processamento = False
 
+        # Ensure GUI is updated with initial progress state from the main thread
         self.root.after(0, lambda: self.progress_bar.config(value=0, maximum=self.total_pages_to_process))
         self.root.after(0, lambda: self.status_label.config(text=f"Iniciando processamento de {self.total_pages_to_process} páginas..."))
         self.root.after(0, lambda: self.set_progress_bar_style("Default.Horizontal.TProgressbar"))
@@ -769,7 +776,7 @@ class AppCelescReporter:
         info_popup.transient(self.root)
         info_popup.grab_set()
         info_popup.resizable(False, False)
-        info_popup.configure(bg="#f0f0f0") 
+        info_popup.configure(bg="#f0f0f0")
 
         # --- ADIÇÃO: Definir ícone para o Toplevel window ---
         if os.path.exists(self.icon_path):
@@ -779,7 +786,7 @@ class AppCelescReporter:
                 print(f"Erro ao carregar ícone para o popup: {e}")
         # --- FIM DA ADIÇÃO ---
 
-        content_frame = Frame(info_popup, padx=15, pady=15, bg=info_popup.cget("bg")) 
+        content_frame = Frame(info_popup, padx=15, pady=15, bg=info_popup.cget("bg"))
         content_frame.pack(expand=True, fill=tk.BOTH)
 
         version_label = Label(content_frame, text=f"{self.root.title()} - by Elias", font=("Segoe UI", 10), bg=content_frame.cget("bg"), fg="#002b00")
