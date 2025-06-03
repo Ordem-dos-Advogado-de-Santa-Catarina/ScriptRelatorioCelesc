@@ -282,7 +282,7 @@ def create_rounded_button(parent, text, command, width=20, height=20, bg_color=N
 class AppCelescReporter:
     def __init__(self, root_window):
         self.root = root_window
-        self.root.title("Gerador de Relatório Celesc - ver 0.5a")
+        self.root.title("Gerador de Relatório Celesc - ver 0.7a")
         self.center_window(700, 650)
         # --- Adição para tornar a janela não redimensionável ---
         self.root.resizable(False, False)
