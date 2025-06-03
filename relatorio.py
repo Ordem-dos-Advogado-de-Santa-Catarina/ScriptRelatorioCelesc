@@ -264,14 +264,13 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback): # Adici
 
     return results_for_this_pdf
 
-# --- Função para criar botões arredondados (copiado de PDF2EXCEL.py) ---
-def create_rounded_button(parent, text, command, width=30, height=30, bg_color="#007bff", text_color="#FFFFFF"):
+# Função para criar botões arredondados (AGORA COM O ESTILO NOVO)
+def create_rounded_button(parent, text, command, width=20, height=20):
     canvas = Canvas(parent, width=width, height=height, bd=0, highlightthickness=0, relief='ridge', bg=parent.cget("bg"))
-    # Desenha o círculo/oval
-    # As coordenadas são (x1, y1, x2, y2) para o retângulo que circunscreve o oval
-    # Adiciona uma pequena margem para a borda não ser cortada
-    oval_id = canvas.create_oval(2, 2, width-2, height-2, outline=bg_color, fill=bg_color)
-    text_id = canvas.create_text(width/2, height/2, text=text, fill=text_color, font=("Segoe UI Bold", int(height/2.5)))
+    # Desenha o círculo azul (hardcoded para o estilo desejado)
+    canvas.create_oval(1, 1, width-2, height-2, outline="#0000FF", fill="#0000FF")
+    # Adiciona o texto branco no centro (hardcoded para o estilo desejado)
+    canvas.create_text(width/2, height/2, text=text, fill="#FFFFFF", font=("Segoe UI Bold", int(height/2)))
     canvas.bind("<Button-1>", lambda event: command())
     return canvas
 
@@ -373,9 +372,10 @@ class AppCelescReporter:
         self.status_label = ttk.Label(action_frame, text="Aguardando configuração...")
         self.status_label.pack(fill=tk.X, pady=5)
 
-        # --- Adição do botão de Informação "i" ---
-        self.show_info_button_canvas = create_rounded_button(self.root, "i", self.show_info, width=25, height=25, bg_color="#007bff", text_color="#FFFFFF")
-        self.show_info_button_canvas.place(relx=1.0, rely=1.0, x=-10, y=-10, anchor="se")
+        # Botão de Informação "i" (estilo NOVO azul redondo, sem passar as cores explicitamente aqui)
+        show_info_button_canvas = create_rounded_button(root, "i", self.show_info, width=20, height=20)
+        # Posicionamento do botão de informação no canto inferior direito
+        show_info_button_canvas.place(relx=1.0, rely=1.0, x=-10, y=-10, anchor="se") # x e y negativos para dar uma margem da borda
 
     def set_progress_bar_style(self, style_name):
         """Define o estilo visual da barra de progresso."""
@@ -409,7 +409,7 @@ class AppCelescReporter:
         self.root.geometry(f'{width}x{height}+{int(x)}+{int(y)}')
 
     def load_base_sheet(self):
-        """Carrega a planilha base de UCs e atualiza o status na GUI."""
+        """Carrega a planilha base de UCs e atualiza o status na interface."""
         self.log_message("Tentando carregar planilha base...", "INFO")
         try:
             if not os.path.exists(self.base_sheet_path):
