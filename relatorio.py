@@ -11,7 +11,7 @@ import threading
 # Tentar importar openpyxl e seus componentes necessários
 try:
     from openpyxl.utils import get_column_letter
-    from openpyxl.styles import Alignment, PatternFill # Adicionado PatternFill
+    from openpyxl.styles import Alignment, PatternFill # PatternFill adicionado para o destaque
 except ImportError:
     messagebox.showerror("Dependência Faltando",
                          "A biblioteca 'openpyxl' é necessária para formatação avançada do Excel. "
@@ -118,7 +118,7 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
 
     valor_liquido_fatura = extract_valor_total_fatura_from_block(text_block)
     if valor_liquido_fatura == 0.0 and logger_func:
-         logger_func(f"AVISO: Valor Líquido da fatura (Valor Total da Fatura) não encontrado ou zerado para UC {uc_number} em {pdf_filename_for_error_logging}. Verifique o PDF ou o padrão de extração.", "WARNING")
+         logger_func(f"Valor Líquido da fatura (Valor Total da Fatura) não encontrado ou zerado para UC {uc_number} em {pdf_filename_for_error_logging}. Verifique o PDF ou o padrão de extração.", "WARNING")
 
     # --- Extração de Tributos Retidos (RETENÇÃO) ---
     tributos_retidos_patterns = {
@@ -315,6 +315,9 @@ class AppCelescReporter:
         self.processed_pages_count = 0
         self.output_dir = os.path.join(os.path.expanduser("~"), "Desktop")
 
+        # --- Flag para rastrear avisos específicos ---
+        self.has_specific_warnings = False
+
         style = ttk.Style(self.root)
         style.theme_use('clam')
         # Definir estilos para a barra de progresso
@@ -400,11 +403,20 @@ class AppCelescReporter:
         self.progress_bar.config(style=style_name)
 
     def log_message(self, message, level="INFO"):
+        """Insere uma mensagem no widget de log e configura tags para colorir."""
+        display_message = f"[{level}] {message}\n"
+        tag = level.upper()
+
         self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, f"[{level}] {message}\n", level.upper())
+        self.log_text.insert(tk.END, display_message, tag)
         self.log_text.config(state=tk.DISABLED)
         self.log_text.see(tk.END)
-        # self.root.update_idletasks() # Pode causar lentidão se chamado muitas vezes em loop
+
+        # --- Detecta o aviso específico sobre Valor Líquido e ativa a flag ---
+        if level == "WARNING" and message.startswith("Valor Líquido da fatura (Valor Total da Fatura) não encontrado ou zerado para UC"):
+            self.has_specific_warnings = True
+            # Opcional: logar um debug para confirmar a ativação da flag
+            # self.log_message("DEBUG: Flag 'has_specific_warnings' ativada.", "DEBUG")
 
     def update_progress(self, pages_processed):
         """Atualiza a barra de progresso e o status label."""
@@ -415,9 +427,6 @@ class AppCelescReporter:
         # Garante que o valor não ultrapasse o máximo
         if current_progress > total_steps:
              current_progress = total_steps
-             # Pode adicionar um log aqui se isso acontecer inesperadamente
-             # self.log_message(f"Aviso: Progresso {current_progress} excedeu total {total_steps}.", "WARNING")
-
 
         # Use root.after para atualizar a GUI a partir da thread secundária
         self.root.after(0, lambda: self.progress_bar.config(value=current_progress))
@@ -519,9 +528,11 @@ class AppCelescReporter:
 
     def start_processing(self):
         """Inicia o processo de extração e geração do relatório em uma nova thread."""
+        # Limpa logs anteriores e reseta flags
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete('1.0', tk.END)
         self.log_text.config(state=tk.DISABLED)
+        self.has_specific_warnings = False # Reset flag at the start of new processing
         self.log_message("Iniciando processo de verificação...", "INFO")
 
         self.load_base_sheet()
@@ -673,9 +684,70 @@ class AppCelescReporter:
         else:
              df_errors = pd.DataFrame(columns=final_columns_order_errors)
 
-
         output_file_path = os.path.join(self.output_dir, "Relatorio_Celesc.xlsx")
 
+        # --- Definir o status final e a mensagem APÓS os DataFrames serem criados ---
+        num_registros_extraidos = len(df_report_data)
+        num_erros_reportados = len(df_errors)
+
+        final_status_message = ""
+        final_messagebox_title = ""
+        final_messagebox_type = messagebox.showinfo # Default para sucesso/informação
+
+        if erros_encontrados_no_processamento:
+            # Caso 1: Erros críticos ocorreram
+            self.set_progress_bar_style("Error.Horizontal.TProgressbar")
+            final_status_message = "Concluído com ERROS."
+            final_messagebox_title = "Processamento Concluído com Alertas"
+            summary_message = f"Processamento concluído com ERROS!\n"
+            if num_registros_extraidos > 0:
+                summary_message += f"{num_registros_extraidos} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
+            summary_message += f"{num_erros_reportados} problemas/erros encontrados durante o processamento, listados na aba 'Relatorio_Erros'."
+            self.log_message(f"Processamento concluído com {num_erros_reportados} problemas/erros.", "WARNING")
+            final_messagebox_type = messagebox.showwarning
+
+        elif self.has_specific_warnings and num_registros_extraidos > 0:
+            # Caso 2: Avisos específicos ocorreram E alguns dados foram extraídos
+            self.set_progress_bar_style("Error.Horizontal.TProgressbar") # Usando estilo de erro para indicar aviso
+            final_status_message = "Concluído com Avisos!"
+            final_messagebox_title = "Processamento Concluído com Avisos"
+            summary_message = f"Processamento concluído com Avisos!\n"
+            summary_message += f"{num_registros_extraidos} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
+            self.log_message("Processamento concluído com avisos.", "WARNING")
+            final_messagebox_type = messagebox.showwarning
+
+        elif num_registros_extraidos == 0:
+            # Caso 3: Nenhum dado extraído (Este é o resultado principal se não houve erros críticos ou avisos com dados)
+            # Este caso é alcançado se (sem erros críticos E sem avisos específicos OU avisos específicos mas sem extração de dados)
+            self.set_progress_bar_style("Error.Horizontal.TProgressbar")
+            final_status_message = "Concluído (Sem dados extraídos)."
+            final_messagebox_title = "Processamento Concluído"
+            summary_message = "Processamento concluído. Nenhum dado de fatura válido foi extraído.\nVerifique se selecionou PDFs e se eles contêm faturas individuais com UCs identificáveis (além da página de sumário)."
+            self.log_message(summary_message, "INFO")
+            final_messagebox_type = messagebox.showinfo # Sem aviso/erro para ausência de dados, apenas informação.
+
+        else:
+            # Caso 4: Sucesso (Dados extraídos, sem erros críticos, sem avisos específicos impactantes)
+            # Este caso é alcançado se num_registros_extraidos > 0 E NÃO (erros_encontrados_no_processamento OU (self.has_specific_warnings E num_registros_extraidos > 0))
+            # Basicamente, sucesso normal.
+            self.set_progress_bar_style("Success.Horizontal.TProgressbar")
+            final_status_message = "Concluído com sucesso!"
+            final_messagebox_title = "Processamento Concluído"
+            summary_message = f"Processamento concluído com sucesso!\n{num_registros_extraidos} registros de fatura extraídos na aba 'Relatorio_Dados_Extraidos'."
+            self.log_message("Processamento concluído com sucesso!", "SUCCESS")
+            final_messagebox_type = messagebox.showinfo
+
+        # --- Exibe a mensagem de status final na GUI ---
+        self.status_label.config(text=final_status_message)
+
+        # --- Exibe a messagebox final ---
+        if output_file_path: # Garante que o caminho do arquivo foi definido
+            try:
+                final_messagebox_type(final_messagebox_title, summary_message + f"\nRelatório salvo em:\n{output_file_path}")
+            except Exception as msg_e:
+                self.log_message(f"Erro ao exibir messagebox: {msg_e}", "ERROR")
+
+        # --- Salva e abre o arquivo Excel ---
         try:
             self.log_message(f"Salvando relatório em: {output_file_path}", "INFO")
             with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
@@ -686,7 +758,7 @@ class AppCelescReporter:
 
                     worksheet.freeze_panes = 'A2'
 
-                    # Define yellow fill style
+                    # Define o estilo de preenchimento amarelo para valores zero em LÍQUIDO (R$)
                     yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
 
                     for col_name_df in currency_cols_names_for_excel_fmt:
@@ -695,40 +767,43 @@ class AppCelescReporter:
                             col_letter = get_column_letter(excel_col_idx)
                             for row_num in range(2, worksheet.max_row + 1):
                                 cell = worksheet[f'{col_letter}{row_num}']
+                                # Garante que a célula tenha um valor e seja um número antes de formatar/verificar
                                 if cell.value is not None and isinstance(cell.value, (int, float)):
-                                    # Check if value is zero and apply fill
-                                    if cell.value == 0:
-                                        cell.fill = yellow_fill
-                                    # Apply currency format
+                                    # Aplica formato de moeda a todas as colunas de moeda
                                     cell.number_format = 'R$ #,##0.00'
+                                    # Aplica preenchimento amarelo APENAS à coluna "LÍQUIDO (R$)" se o valor for 0
+                                    if col_name_df == "LÍQUIDO (R$)" and cell.value == 0:
+                                        cell.fill = yellow_fill
 
+                    # Ajusta a largura das colunas para a planilha de dados
                     for col_idx_df, col_name_df in enumerate(final_columns_order_data):
                         excel_col_idx = col_idx_df + 1
                         column_letter_val = get_column_letter(excel_col_idx)
                         max_len = 0
                         header_cell_val = worksheet[f'{column_letter_val}1'].value
                         if header_cell_val:
-                             max_len = len(str(header_cell_val))
+                             max_len = len(str(header_cell_val)) # Começa com o tamanho do cabeçalho
                         for row_num in range(2, worksheet.max_row + 1):
                             cell = worksheet[f'{column_letter_val}{row_num}']
                             if cell.value is not None:
                                 cell_str_val = ""
                                 if col_name_df in currency_cols_names_for_excel_fmt and isinstance(cell.value, (int, float)):
+                                    # Formata o valor para cálculo de comprimento, incluindo símbolo de moeda e separadores
                                     formatted_value_for_len = f"R$ {cell.value:_.2f}".replace('.',',').replace('_','.')
                                     if cell.value < 0:
                                          formatted_value_for_len = f"-R$ {abs(cell.value):_.2f}".replace('.',',').replace('_','.')
                                     cell_str_val = formatted_value_for_len
                                 else:
                                     cell_str_val = str(cell.value)
-                                max_len = max(max_len, len(cell_str_val))
-                        adjusted_width = (max_len + 2) if max_len > 0 else 12
+                                max_len = max(max_len, len(cell_str_val)) # Atualiza max_len com o comprimento da string da célula atual
+                        adjusted_width = (max_len + 2) if max_len > 0 else 12 # Adiciona padding, padrão para 12 se não houver conteúdo
                         worksheet.column_dimensions[column_letter_val].width = adjusted_width
+
 
                 if not df_errors.empty:
                     df_errors.to_excel(writer, index=False, sheet_name='Relatorio_Erros')
                     worksheet_errors = writer.sheets['Relatorio_Erros']
                     worksheet_errors.freeze_panes = 'A2'
-
                     for col_idx_df, col_name_df in enumerate(final_columns_order_errors):
                         excel_col_idx = col_idx_df + 1
                         column_letter_val = get_column_letter(excel_col_idx)
@@ -739,36 +814,10 @@ class AppCelescReporter:
                                 max_len = max(max_len, len(str(cell.value)))
                         adjusted_width = (max_len + 2) if max_len > 0 else 12
                         if col_name_df == "Observação":
-                            adjusted_width = min(adjusted_width, 80)
+                            adjusted_width = min(adjusted_width, 80) # Limita a largura para textos longos
                         worksheet_errors.column_dimensions[column_letter_val].width = adjusted_width
 
-
-            num_registros_extraidos = len(df_report_data)
-            num_erros_reportados = len(df_errors)
-
-            if erros_encontrados_no_processamento:
-                 self.set_progress_bar_style("Error.Horizontal.TProgressbar")
-                 self.status_label.config(text="Concluído com ERROS.")
-                 summary_message = f"Processamento concluído com ERROS!\n"
-                 if num_registros_extraidos > 0:
-                    summary_message += f"{num_registros_extraidos} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
-                 summary_message += f"{num_erros_reportados} problemas/erros encontrados durante o processamento, listados na aba 'Relatorio_Erros'."
-                 self.log_message(f"Processamento concluído com {num_erros_reportados} problemas/erros.", "WARNING")
-                 messagebox.showwarning("Processamento Concluído com Alertas", summary_message + f"\nRelatório salvo em:\n{output_file_path}")
-            elif num_registros_extraidos == 0:
-                self.set_progress_bar_style("Error.Horizontal.TProgressbar")
-                summary_message = "Processamento concluído. Nenhum dado de fatura válido foi extraído.\nVerifique se selecionou PDFs e se eles contêm faturas individuais com UCs identificáveis (além da página de sumário)."
-                self.status_label.config(text="Concluído (Sem dados extraídos).")
-                self.log_message(summary_message, "INFO")
-                messagebox.showinfo("Processamento Concluído", summary_message)
-            else:
-                self.set_progress_bar_style("Success.Horizontal.TProgressbar")
-                self.status_label.config(text="Concluído com sucesso!")
-                summary_message = f"Processamento concluído com sucesso!\n{num_registros_extraidos} registros de fatura extraídos na aba 'Relatorio_Dados_Extraidos'."
-                self.log_message("Processamento concluído com sucesso!", "SUCCESS")
-                messagebox.showinfo("Processamento Concluído", summary_message + f"\nRelatório salvo em:\n{output_file_path}")
-
-
+            # Tenta abrir o arquivo
             if os.path.exists(output_file_path):
                 try:
                     if sys.platform == "win32":
@@ -781,12 +830,12 @@ class AppCelescReporter:
                     self.log_message(f"Não foi possível abrir o relatório automaticamente: {open_e}", "WARNING")
 
         except Exception as e:
-            self.set_progress_bar_style("Error.Horizontal.TProgressbar")
             self.log_message(f"Erro CRÍTICO ao salvar o relatório Excel: {e}", "CRITICAL_ERROR")
             messagebox.showerror("Erro ao Salvar", f"Não foi possível salvar o relatório Excel: {e}")
-            self.status_label.config(text="Erro ao salvar relatório.")
+            self.status_label.config(text="Erro ao salvar relatório.") # Garante que o status reflita o erro de salvamento
         finally:
             self.process_button.config(state=tk.NORMAL)
+
 
     def show_info(self):
         """
