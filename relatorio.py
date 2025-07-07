@@ -11,7 +11,7 @@ import threading
 # Tentar importar openpyxl e seus componentes necessários
 try:
     from openpyxl.utils import get_column_letter
-    from openpyxl.styles import Alignment
+    from openpyxl.styles import Alignment, PatternFill # Adicionado PatternFill
 except ImportError:
     messagebox.showerror("Dependência Faltando",
                          "A biblioteca 'openpyxl' é necessária para formatação avançada do Excel. "
@@ -207,7 +207,7 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback): # Adici
                     logger_func(f"Página {page_num + 1} de {pdf_filename} não contém texto extraível.", "INFO")
                     # Chamar callback de progresso para a página processada (mesmo que vazia)
                     if progress_callback:
-                         progress_callback(1)
+                        progress_callback(1)
                     continue
 
                 uc_pattern = r"(?:UC:|Unidade Consumidora:)\s*\d+"
@@ -686,6 +686,9 @@ class AppCelescReporter:
 
                     worksheet.freeze_panes = 'A2'
 
+                    # Define yellow fill style
+                    yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+
                     for col_name_df in currency_cols_names_for_excel_fmt:
                         if col_name_df in df_report_data.columns:
                             excel_col_idx = final_columns_order_data.index(col_name_df) + 1
@@ -693,6 +696,10 @@ class AppCelescReporter:
                             for row_num in range(2, worksheet.max_row + 1):
                                 cell = worksheet[f'{col_letter}{row_num}']
                                 if cell.value is not None and isinstance(cell.value, (int, float)):
+                                    # Check if value is zero and apply fill
+                                    if cell.value == 0:
+                                        cell.fill = yellow_fill
+                                    # Apply currency format
                                     cell.number_format = 'R$ #,##0.00'
 
                     for col_idx_df, col_name_df in enumerate(final_columns_order_data):
