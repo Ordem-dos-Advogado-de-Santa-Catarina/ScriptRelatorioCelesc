@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import threading
+from datetime import datetime # Importado para a data no nome do arquivo
 
 # Tentar importar openpyxl e seus componentes necessários
 try:
@@ -315,8 +316,16 @@ class AppCelescReporter:
         self.processed_pages_count = 0
         self.output_dir = os.path.join(os.path.expanduser("~"), "Desktop")
 
-        # --- Flag para rastrear avisos específicos ---
-        self.has_specific_warnings = False
+        # --- Estado de severidade para a barra de progresso ---
+        # 0: Normal (Green), 1: Warning (Yellow), 2: Error (Red)
+        self.current_severity = 0
+        self.SEVERITY_MAP = {
+            "INFO": 0, "DEBUG": 0, "SUCCESS": 0,
+            "WARNING": 1,
+            "ERROR": 2, "CRITICAL_ERROR": 2
+        }
+
+        self.has_specific_warnings = False # Flag para avisos específicos (para o resumo final)
 
         style = ttk.Style(self.root)
         style.theme_use('clam')
@@ -401,10 +410,17 @@ class AppCelescReporter:
 
     def set_progress_bar_style(self, style_name):
         """Define o estilo visual da barra de progresso."""
-        self.progress_bar.config(style=style_name)
+        try:
+            # Tenta aplicar o estilo diretamente. Se o estilo não existir, um TclError será levantado.
+            self.progress_bar.config(style=style_name)
+        except tk.TclError as e:
+            # Se ocorrer um erro (ex: estilo não encontrado), loga e usa o padrão.
+            self.log_message(f"Erro ao aplicar estilo '{style_name}' à barra de progresso: {e}. Usando estilo padrão.", "WARNING")
+            self.progress_bar.config(style="Default.Horizontal.TProgressbar")
+
 
     def log_message(self, message, level="INFO"):
-        """Insere uma mensagem no widget de log e configura tags para colorir."""
+        """Insere uma mensagem no widget de log, configura tags para colorir e atualiza a severidade."""
         display_message = f"[{level}] {message}\n"
         tag = level.upper()
 
@@ -413,14 +429,30 @@ class AppCelescReporter:
         self.log_text.config(state=tk.DISABLED)
         self.log_text.see(tk.END)
 
-        # --- Detecta o aviso específico sobre Valor Líquido e ativa a flag ---
+        # --- Atualização da severidade e cor da barra de progresso ---
+        new_severity = self.SEVERITY_MAP.get(level, 0) # Padrão para INFO (0) se o nível não estiver no mapa
+
+        # Atualiza a severidade atual apenas se o novo log for mais grave
+        if new_severity > self.current_severity:
+            self.current_severity = new_severity
+
+            # Aplica a cor correspondente à nova severidade
+            if self.current_severity == 0: # INFO, SUCCESS, DEBUG
+                self.set_progress_bar_style("Success.Horizontal.TProgressbar")
+            elif self.current_severity == 1: # WARNING
+                self.set_progress_bar_style("Warning.Horizontal.TProgressbar")
+            else: # self.current_severity == 2 (ERROR, CRITICAL_ERROR)
+                self.set_progress_bar_style("Error.Horizontal.TProgressbar")
+            # Opcional: Chamar update_idletasks para garantir que a GUI seja atualizada imediatamente
+            # self.root.update_idletasks()
+
+
+        # A flag self.has_specific_warnings é para o resumo FINAL, não para a cor em tempo real da barra.
         if level == "WARNING" and message.startswith("Valor Líquido da fatura (Valor Total da Fatura) não encontrado ou zerado para UC"):
             self.has_specific_warnings = True
-            # Opcional: logar um debug para confirmar a ativação da flag
-            # self.log_message("DEBUG: Flag 'has_specific_warnings' ativada.", "DEBUG")
 
     def update_progress(self, pages_processed):
-        """Atualiza a barra de progresso e o status label."""
+        """Atualiza a barra de progresso (valor) e o status label."""
         self.processed_pages_count += pages_processed
         current_progress = self.processed_pages_count
         total_steps = self.total_pages_to_process
@@ -533,41 +565,54 @@ class AppCelescReporter:
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete('1.0', tk.END)
         self.log_text.config(state=tk.DISABLED)
-        self.has_specific_warnings = False # Reseta a flag no início de um novo processamento
+
+        # --- Resetar estados de processamento ---
+        self.current_severity = 0  # Reseta a severidade para Normal (Verde) no início do processamento
+        self.has_specific_warnings = False # Reseta esta flag também
+
         self.log_message("Iniciando processo de verificação...", "INFO")
 
         # --- Validation checks ---
         self.load_base_sheet() # Garante que a planilha base seja carregada antes da verificação
 
+        # --- ERRO 1: Planilha Base Inválida ---
         if self.df_base is None or self.df_base.empty:
             msg = "Planilha base de UCs não carregada, inválida ou vazia. Verifique o arquivo 'base/database.xlsx'."
             self.log_message(msg, "ERROR")
             messagebox.showerror("Erro de Configuração", msg)
-            # Atualiza a UI para refletir o estado de erro
+            # Aplica o estado visual de erro à barra de progresso
             self.set_progress_bar_style("Error.Horizontal.TProgressbar")
+            self.progress_bar["value"] = 1 # Preenche a barra
+            self.progress_bar["maximum"] = 1 # Define o máximo para 100%
             self.status_label.config(text="Erro de configuração: Planilha base.")
             self.process_button.config(state=tk.NORMAL) # Reabilita o botão para correção
-            return
+            return # Interrompe o processamento
 
+        # --- ERRO 2: Nenhum PDF selecionado ---
         if not self.pdf_files:
             msg = "Nenhum arquivo PDF foi selecionado para processamento."
             self.log_message(msg, "ERROR")
             messagebox.showerror("Erro de Configuração", msg)
-            # Atualiza a UI para refletir o estado de erro
+            # Aplica o estado visual de erro à barra de progresso
             self.set_progress_bar_style("Error.Horizontal.TProgressbar")
+            self.progress_bar["value"] = 1 # Preenche a barra
+            self.progress_bar["maximum"] = 1 # Define o máximo para 100%
             self.status_label.config(text="Erro de configuração: PDFs não selecionados.")
             self.process_button.config(state=tk.NORMAL) # Reabilita o botão para correção
-            return
+            return # Interrompe o processamento
 
+        # --- ERRO 3: Pasta de Saída Inválida ---
         if not self.output_dir or not os.path.isdir(self.output_dir):
             msg = "Pasta de saída inválida ou não definida."
             self.log_message(msg, "ERROR")
             messagebox.showerror("Erro de Configuração", msg)
-            # Atualiza a UI para refletir o estado de erro
+            # Aplica o estado visual de erro à barra de progresso
             self.set_progress_bar_style("Error.Horizontal.TProgressbar")
+            self.progress_bar["value"] = 1 # Preenche a barra
+            self.progress_bar["maximum"] = 1 # Define o máximo para 100%
             self.status_label.config(text="Erro de configuração: Pasta de saída inválida.")
             self.process_button.config(state=tk.NORMAL) # Reabilita o botão para correção
-            return
+            return # Interrompe o processamento
 
         # --- Se todas as validações passarem, prepara para o processamento ---
         self.total_pages_to_process = 0
@@ -590,7 +635,9 @@ class AppCelescReporter:
         self.process_button.config(state=tk.DISABLED) # Desabilita o botão enquanto processa
         self.progress_bar["value"] = 0
         self.progress_bar["maximum"] = self.total_pages_to_process
-        self.set_progress_bar_style("Default.Horizontal.TProgressbar") # Define o estilo inicial (verde)
+        # Define o estilo inicial (Verde) para a barra de progresso.
+        # A cor final será determinada em _processing_complete.
+        self.set_progress_bar_style("Success.Horizontal.TProgressbar")
 
         self.root.update_idletasks()
 
@@ -601,12 +648,12 @@ class AppCelescReporter:
         """Contém o loop principal de processamento de PDF, executa em uma thread separada."""
         all_extracted_data = []
         error_items = []
-        erros_encontrados_no_processamento = False
+        erros_encontrados_no_processamento = False # Flag geral para erros críticos
 
-        # Ensure GUI is updated with initial progress state from the main thread
+        # Garante que a GUI seja atualizada com o estado inicial do progresso (barra verde)
         self.root.after(0, lambda: self.progress_bar.config(value=0, maximum=self.total_pages_to_process))
         self.root.after(0, lambda: self.status_label.config(text=f"Iniciando processamento de {self.total_pages_to_process} páginas..."))
-        self.root.after(0, lambda: self.set_progress_bar_style("Default.Horizontal.TProgressbar"))
+        self.set_progress_bar_style("Success.Horizontal.TProgressbar") # Define a cor inicial como Verde
 
         self.log_message(f"Iniciando processamento de {len(self.pdf_files)} PDFs ({self.total_pages_to_process} páginas totais estimadas)...", "INFO")
 
@@ -619,13 +666,12 @@ class AppCelescReporter:
             for item in results_from_pdf:
                 if isinstance(item, dict):
                     if "error" in item:
-                        erros_encontrados_no_processamento = True # Flag é definida aqui
+                        erros_encontrados_no_processamento = True # Marca que ocorreu algum erro crítico
                         error_items.append(item) # Adiciona o dicionário de erro à lista
                     else:
                         all_extracted_data.append(item)
         
-        # Safeguard: Garante que a flag erros_encontrados_no_processamento seja True se error_items contiver algo.
-        # Isso é uma garantia extra caso a lógica dentro do loop não tenha definido a flag corretamente por algum motivo.
+        # Se houve erros reportados na lista error_items, garantir que a flag erros_encontrados_no_processamento seja True.
         if error_items:
             erros_encontrados_no_processamento = True
 
@@ -634,7 +680,8 @@ class AppCelescReporter:
         self.root.after(0, lambda: self.status_label.config(text=f"Processamento concluído! Gerando relatório..."))
 
 
-        self.root.after(100, lambda: self._processing_complete(all_extracted_data, error_items, erros_encontrados_no_processamento)) # Pequeno delay para a barra atingir 100%
+        # Chama o método de finalização após um pequeno delay para garantir que a barra de progresso esteja visivelmente completa
+        self.root.after(100, lambda: self._processing_complete(all_extracted_data, error_items, erros_encontrados_no_processamento))
 
 
     def _processing_complete(self, all_extracted_data, error_items, erros_encontrados_no_processamento):
@@ -688,37 +735,37 @@ class AppCelescReporter:
              df_report_data = pd.DataFrame(columns=final_columns_order_data)
 
 
-        # --- Calculate and append TOTAL row ---
-        # Only add a total row if there was at least some data extracted AND df_report_data is not empty.
+        # --- Calcula e adiciona a linha de TOTAL ---
+        # Adiciona a linha de TOTAL apenas se houver dados extraídos e o DataFrame não estiver vazio.
         if not df_report_data.empty:
             total_row_data = {}
-            # Add labels for identifying columns
+            # Adiciona rótulos para identificar colunas
             total_row_data["UC"] = "TOTAL"
-            # Fill other non-numeric columns with empty strings or appropriate labels
+            # Preenche outras colunas não numéricas com strings vazias ou rótulos apropriados
             for col in final_columns_order_data:
                 if col not in currency_cols_names_for_excel_fmt and col not in ["UC"]:
                     total_row_data[col] = ""
 
-            # Calculate sums for currency columns
+            # Calcula as somas para as colunas de moeda
             for col_name in currency_cols_names_for_excel_fmt:
                 if col_name in df_report_data.columns:
-                    # Ensure the column is numeric before summing
+                    # Garante que a coluna seja numérica antes de somar
                     total_row_data[col_name] = df_report_data[col_name].sum()
                 else:
-                    # If a currency column was never present, its total is 0.0
+                    # Se uma coluna de moeda nunca esteve presente, seu total é 0.0
                     total_row_data[col_name] = 0.0
 
-            # Create DataFrame for the total row
+            # Cria DataFrame para a linha de total
             df_total_row = pd.DataFrame([total_row_data])
 
-            # Ensure the total row DataFrame has the same columns in the correct order
+            # Garante que o DataFrame da linha de total tenha as mesmas colunas na ordem correta
             df_total_row = df_total_row.reindex(columns=final_columns_order_data)
 
-            # Append the total row to the main DataFrame
+            # Adiciona a linha de total ao DataFrame principal. Isso a posiciona corretamente APÓS os dados.
             df_report_data = pd.concat([df_report_data, df_total_row], ignore_index=True)
-        # --- End of TOTAL row calculation ---
+        # --- Fim do cálculo da linha de TOTAL ---
 
-        # --- Process errors dataframe ---
+        # --- Processa o DataFrame de erros ---
         df_errors = pd.DataFrame()
         if error_items:
             df_errors = pd.DataFrame(error_items)
@@ -730,73 +777,79 @@ class AppCelescReporter:
         else:
              df_errors = pd.DataFrame(columns=final_columns_order_errors)
 
-        output_file_path = os.path.join(self.output_dir, "Relatorio_Celesc.xlsx")
+        # --- MODIFICAÇÃO: Geração do nome do arquivo com data ---
+        try:
+            today_str = datetime.today().strftime("%d.%m.%Y")
+            output_filename = f"{today_str} Repasse-Celesc.xlsx"
+            output_file_path = os.path.join(self.output_dir, output_filename)
+            self.log_message(f"Nome do arquivo de saída gerado: {output_filename}", "INFO")
+        except Exception as e:
+            self.log_message(f"Erro ao gerar nome do arquivo de saída: {e}. Usando nome padrão.", "WARNING")
+            output_file_path = os.path.join(self.output_dir, "Relatorio_Celesc.xlsx") # Fallback
 
-        # --- Calcular contagens finais ---
-        num_registros_extraidos = len(df_report_data)
-        num_erros_reportados = len(df_errors)
+        # --- Determina o status final e define o estilo da barra de progresso ---
+        # A cor final da barra de progresso será baseada no `self.current_severity` acumulado.
+        final_progress_bar_style = "Success.Horizontal.TProgressbar" # Padrão para Verde
+        if self.current_severity == 1: # Houve algum Aviso
+            final_progress_bar_style = "Warning.Horizontal.TProgressbar"
+        elif self.current_severity == 2: # Houve algum Erro
+            final_progress_bar_style = "Error.Horizontal.TProgressbar"
 
-        # --- Determinar o status final e definir o estilo da barra de progresso ---
+        # Aplica o estilo final à barra de progresso APÓS a conclusão do processamento.
+        self.set_progress_bar_style(final_progress_bar_style)
+
+
+        # --- Define as mensagens de status, título da messagebox e tipo de messagebox ---
         final_status_message = ""
         final_messagebox_title = ""
-        final_messagebox_type = messagebox.showinfo # Default para info/sucesso
-        progress_bar_style = "Success.Horizontal.TProgressbar" # Default para sucesso (verde)
-
+        final_messagebox_type = messagebox.showinfo # Padrão para sucesso
         summary_message = ""
 
+        # Verifica primeiro os erros críticos, pois eles têm a maior prioridade para as mensagens de status.
         if erros_encontrados_no_processamento:
-            # Caso 1: Erros Críticos ocorreram (Barra de progresso: VERMELHA)
-            progress_bar_style = "Error.Horizontal.TProgressbar"
+            # Caso 1: Ocorreram Erros Críticos
             final_status_message = "Concluído com ERROS."
             final_messagebox_title = "Processamento Concluído com Alertas"
             summary_message = f"Processamento concluído com ERROS!\n"
-            if num_registros_extraidos > 0: # Se houve dados extraídos ALÉM dos erros
-                summary_message += f"{num_registros_extraidos} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
-            summary_message += f"{num_erros_reportados} problemas/erros encontrados durante o processamento, listados na aba 'Relatorio_Erros'."
-            self.log_message(f"Processamento concluído com {num_erros_reportados} problemas/erros.", "ERROR") # Logar como ERROR quando há erros críticos
+            if len(all_extracted_data) > 0: # Usa len(all_extracted_data) para as extrações bem-sucedidas
+                summary_message += f"{len(all_extracted_data)} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
+            summary_message += f"{len(error_items)} problemas/erros encontrados durante o processamento, listados na aba 'Relatorio_Erros'."
             final_messagebox_type = messagebox.showwarning
 
         elif self.has_specific_warnings:
-            # Caso 2: Avisos Específicos ocorreram (Barra de progresso: AMARELA)
-            progress_bar_style = "Warning.Horizontal.TProgressbar"
+            # Caso 2: Ocorreram Avisos Específicos (mas nenhum erro crítico)
             final_status_message = "Concluído com Avisos!"
             final_messagebox_title = "Processamento Concluído com Avisos"
             summary_message = f"Processamento concluído com Avisos!\n"
-            if num_registros_extraidos > 0:
-                summary_message += f"{num_registros_extraidos} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
-            self.log_message("Processamento concluído com avisos.", "WARNING")
+            if len(all_extracted_data) > 0:
+                summary_message += f"{len(all_extracted_data)} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
             final_messagebox_type = messagebox.showwarning
 
-        elif num_registros_extraidos == 0:
-            # Caso 3: Nenhum dado extraído (e nenhum erro crítico ou aviso específico capturado acima) (Barra de progresso: AMARELA)
-            progress_bar_style = "Warning.Horizontal.TProgressbar"
+        elif len(all_extracted_data) == 0:
+            # Caso 3: Nenhum dado extraído (e nenhum erro crítico ou aviso específico encontrado)
             final_status_message = "Concluído (Sem dados extraídos)."
             final_messagebox_title = "Processamento Concluído"
             summary_message = "Processamento concluído. Nenhum dado de fatura válido foi extraído.\nVerifique se selecionou PDFs e se eles contêm faturas individuais com UCs identificáveis (além da página de sumário)."
-            self.log_message(summary_message, "INFO")
             final_messagebox_type = messagebox.showinfo
 
         else:
-            # Caso 4: Sucesso (Dados extraídos, sem erros, sem avisos específicos) (Barra de progresso: VERDE)
-            progress_bar_style = "Success.Horizontal.TProgressbar"
+            # Caso 4: Sucesso (Dados extraídos, sem erros, sem avisos)
             final_status_message = "Concluído com sucesso!"
             final_messagebox_title = "Processamento Concluído"
-            summary_message = f"Processamento concluído com sucesso!\n{num_registros_extraidos} registros de fatura extraídos na aba 'Relatorio_Dados_Extraidos'."
-            self.log_message("Processamento concluído com sucesso!", "SUCCESS")
+            summary_message = f"Processamento concluído com sucesso!\n{len(all_extracted_data)} registros de fatura extraídos na aba 'Relatorio_Dados_Extraidos'."
             final_messagebox_type = messagebox.showinfo
 
-        # --- Aplicar atualizações de status final ---
-        self.set_progress_bar_style(progress_bar_style)
+        # --- Aplica a atualização final da mensagem de status ---
         self.status_label.config(text=final_status_message)
 
-        # --- Exibir messagebox final ---
+        # --- Exibe a messagebox final ---
         if output_file_path: # Garante que o caminho do arquivo foi definido antes de mostrar a mensagem
             try:
                 final_messagebox_type(final_messagebox_title, summary_message + f"\nRelatório salvo em:\n{output_file_path}")
             except Exception as msg_e:
                 self.log_message(f"Erro ao exibir messagebox: {msg_e}", "ERROR")
 
-        # --- Salvar e abrir o arquivo Excel ---
+        # --- Salva e abre o arquivo Excel ---
         try:
             self.log_message(f"Salvando relatório em: {output_file_path}", "INFO")
             with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
@@ -870,7 +923,7 @@ class AppCelescReporter:
 
         except Exception as e:
             self.log_message(f"Erro CRÍTICO ao salvar o relatório Excel: {e}", "CRITICAL_ERROR")
-            messagebox.showerror("Erro ao Salvar", f"Não foi possível salvar o relatório Excel: {e}")
+            messagebox.showerror("Erro ao Salvar", f"Não foi possível salvar o relatório: {e}")
             # Garante que o status label reflita o erro de salvamento se algo der errado durante o salvamento
             self.status_label.config(text="Erro ao salvar relatório.")
         finally:
