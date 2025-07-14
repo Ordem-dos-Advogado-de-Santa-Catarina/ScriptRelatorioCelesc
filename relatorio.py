@@ -742,6 +742,13 @@ class AppCelescReporter:
                     worksheet = writer.sheets['Relatorio_Dados_Extraidos'] # Get worksheet here
                     worksheet.freeze_panes = 'A2' # Congela a linha de cabeçalho
                     yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+                    
+                    # Alinhar à esquerda toda a coluna I (coluna 9) exceto o cabeçalho
+                    coluna_index = 9
+                    coluna_letra = get_column_letter(coluna_index)
+                    for row in range(2, worksheet.max_row + 1):  # começa da linha 2 para não afetar o cabeçalho
+                        cell = worksheet[f"{coluna_letra}{row}"]
+                        cell.alignment = Alignment(horizontal="right")
 
                     # Formata colunas de moeda e aplica destaque condicional
                     for col_name_df in currency_cols_names_for_excel_fmt:
@@ -759,9 +766,11 @@ class AppCelescReporter:
                                     # Aplica destaque amarelo se 'LÍQUIDO (R$)' for zero
                                     if col_name_df == "LÍQUIDO (R$)" and cell.value == 0:
                                         cell.fill = yellow_fill
+                                    if col_name_df == "COSIP (R$)" and cell.value == 0:
+                                        cell.fill = yellow_fill
                                 # Ignora células vazias ou em linhas em branco para evitar erros de formatação
                                 elif cell.value is None or str(cell.value).strip() == "":
-                                     pass 
+                                     pass
 
                     # Ajusta largura das colunas
                     for col_idx_df, col_name_df in enumerate(final_columns_order_data):
@@ -793,7 +802,6 @@ class AppCelescReporter:
                         if col_name_df == "UC":
                              adjusted_width = max(adjusted_width, 15) 
                         worksheet.column_dimensions[column_letter_val].width = adjusted_width
-
 
                 if not df_errors.empty:
                     df_errors.to_excel(writer, index=False, sheet_name='Relatorio_Erros')
