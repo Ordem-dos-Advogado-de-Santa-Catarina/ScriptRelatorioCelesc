@@ -57,15 +57,32 @@ def extract_uc_from_block(text_block):
     return None
 
 def extract_valor_total_fatura_from_block(text_block):
-    """Extrai o valor total da fatura (que será o Valor Líquido) do bloco de texto."""
-    match = re.search(r"Valor:\s*R\$\s*([\d\.,]+)", text_block, re.DOTALL | re.IGNORECASE)
-    if match:
-        return parse_value(match.group(1))
+    """
+    Extrai o valor total da fatura (que será o Valor Líquido) do bloco de texto.
+    Tenta encontrar "Valor: R$ XXX" ou "Valor: XXX".
+    """
+    if not text_block or not isinstance(text_block, str):
+        return 0.0
 
-    match_fallback_total = re.search(r"TOTAL A PAGAR\s*R\$\s*([\d\.,]+)", text_block, re.IGNORECASE)
-    if match_fallback_total:
-        return parse_value(match_fallback_total.group(1))
+    # Tenta encontrar o padrão "Valor: R$ [valor]"
+    # O flag re.DOTALL permite que o '.' corresponda a quebras de linha, caso o valor esteja em outra linha.
+    # O flag re.IGNORECASE ignora maiúsculas/minúsculas.
+    match_valor_com_simbolo = re.search(r"Valor:\s*R\$\s*([\d\.,]+)", text_block, re.DOTALL | re.IGNORECASE)
+    if match_valor_com_simbolo:
+        return parse_value(match_valor_com_simbolo.group(1))
 
+    # Se o padrão com R$ não for encontrado, tenta encontrar o padrão "Valor: [valor]" (sem R$)
+    # Este padrão é mais genérico e captura números logo após "Valor:", assumindo que não há "R$" se o anterior falhou.
+    match_valor_sem_simbolo = re.search(r"Valor:\s*([\d\.,]+)", text_block, re.DOTALL | re.IGNORECASE)
+    if match_valor_sem_simbolo:
+        return parse_value(match_valor_sem_simbolo.group(1))
+
+    # Se nenhum dos padrões "Valor:" for encontrado, tenta usar o fallback "TOTAL A PAGAR"
+    match_total_a_pagar = re.search(r"TOTAL A PAGAR\s*R\$\s*([\d\.,]+)", text_block, re.IGNORECASE)
+    if match_total_a_pagar:
+        return parse_value(match_total_a_pagar.group(1))
+
+    # Se nada for encontrado, retorna 0.0
     return 0.0
 
 def extract_item_value_from_block(text_block, item_name_pattern):
@@ -235,7 +252,7 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback):
 class AppCelescReporter:
     def __init__(self, root_window):
         self.root = root_window
-        self.root.title("Gerador de Relatório Celesc - ver 1.0")
+        self.root.title("Gerador de Relatório Celesc - ver 1.1")
         self.center_window(700, 650)
         self.root.resizable(False, False)
 
