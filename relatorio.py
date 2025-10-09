@@ -104,6 +104,74 @@ def extract_item_value_from_block(text_block, item_name_pattern):
         return parse_value(match.group(1))
     return 0.0
 
+def extract_new_controle_data(text_block):
+    """
+    Extrai os dados de Energia e Retenção baseados na alíquota de IRPJ (1,2% ou 4,8%)
+    para a nova planilha de 'Controle'.
+    """
+    data = {
+        "Energia (1,2%)": 0.0,
+        "Retenção(1,2%)": 0.0,
+        "Energia (4,8%)": 0.0,
+        "Retenção(4,8%)": 0.0
+    }
+
+    # Procura a seção de "Itens da Fatura" para focar a extração
+    match_itens = re.search(r"Itens da Fatura.*?(?=Valores Medidos|Tributo Retido IRPJ|$)", text_block, re.DOTALL | re.IGNORECASE)
+    if not match_itens:
+        return data
+
+    relevant_text = match_itens.group(0)
+    lines = relevant_text.split('\n')
+    
+    for line in lines:
+        # Verifica se a linha parece conter a estrutura de dados esperada
+        if re.search(r'\s1,2\s', line) or re.search(r'\s4,8\s', line):
+            # Extrai todos os números (incluindo negativos e decimais com vírgula/ponto) da linha
+            numbers = re.findall(r'-?[\d\.,]+', line)
+            
+            if not numbers:
+                continue
+
+            try:
+                # Localiza a alíquota (1,2 ou 4,8) na lista de números extraídos
+                percent_index = -1
+                if '1,2' in numbers:
+                    percent_index = numbers.index('1,2')
+                    target_key_energia = "Energia (1,2%)"
+                    target_key_retencao = "Retenção(1,2%)"
+                elif '4,8' in numbers:
+                    percent_index = numbers.index('4,8')
+                    target_key_energia = "Energia (4,8%)"
+                    target_key_retencao = "Retenção(4,8%)"
+                else:
+                    continue
+
+                # O layout esperado é: [..., Valor (R$), ICMS (R$), Alíquota (%), IRPJ, PIS, COFINS, CSLL]
+                # Valor (R$) é o 3º número antes da alíquota
+                # Os 4 valores de retenção são os 4 números após a alíquota
+                if percent_index >= 3 and (percent_index + 4) < len(numbers):
+                    # O 'Valor (R$)' é o 3º valor antes da alíquota, conforme a estrutura de colunas
+                    valor_energia = parse_value(numbers[percent_index - 3])
+                    
+                    # Os valores de retenção (IRPJ, PIS, COFINS, CSLL) são os quatro após a alíquota
+                    irpj_val = parse_value(numbers[percent_index + 1])
+                    pis_val = parse_value(numbers[percent_index + 2])
+                    cofins_val = parse_value(numbers[percent_index + 3])
+                    csll_val = parse_value(numbers[percent_index + 4])
+                    
+                    soma_retencao = abs(irpj_val) + abs(pis_val) + abs(cofins_val) + abs(csll_val)
+                    
+                    # Soma os valores encontrados aos totais
+                    data[target_key_energia] += valor_energia
+                    data[target_key_retencao] += soma_retencao
+            
+            except (ValueError, IndexError):
+                # Ocorre se o formato da linha for inesperado. Ignora a linha e continua.
+                continue
+    
+    return data
+
 
 def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_error_logging, logger_func, page_num=None):
     """
@@ -160,7 +228,8 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
 
     numero_pagina_display = f"{pdf_filename_for_error_logging} (Pág. {page_num + 1})" if page_num is not None else pdf_filename_for_error_logging
 
-    return {
+    # Dados para a aba Relatorio (formato antigo)
+    fatura_data = {
         "UC": uc_number,
         "Centro de Custo": cod_reg,
         "Subseção": nome_base,
@@ -171,6 +240,12 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
         "LÍQUIDO (R$)": valor_liquido_fatura,
         "Numero da Pagina": numero_pagina_display
     }
+
+    # Extrai e adiciona os novos dados EXCLUSIVAMENTE para a aba de Controle
+    controle_data = extract_new_controle_data(text_block)
+    fatura_data.update(controle_data)
+
+    return fatura_data
 
 def process_pdf_file(pdf_path, df_base, logger_func, progress_callback):
     """
@@ -655,6 +730,7 @@ class AppCelescReporter:
     def _processing_complete(self, all_extracted_data, error_items, erros_encontrados_no_processamento, all_valor_cobrado_results):
         """Finaliza o processamento, cria o relatório Excel e atualiza a GUI."""
 
+        # Colunas para a aba 'Relatorio' (sem as novas colunas)
         final_columns_order_data = [
             "UC", "Centro de Custo", "Subseção",
             "ENERGIA (R$)",
@@ -664,6 +740,7 @@ class AppCelescReporter:
             "LÍQUIDO (R$)",
             "Numero da Pagina"
         ]
+        # Colunas para a aba de Erros
         final_columns_order_errors = [
             "UC", "Centro de Custo", "Subseção",
             "ENERGIA (R$)",
@@ -672,9 +749,10 @@ class AppCelescReporter:
             "RETENÇÃO (R$)",
             "LÍQUIDO (R$)",
             "Numero da Pagina",
-            "Observação" # Assuming this is the column name for errors
+            "Observação"
         ]
 
+        # Nomes das colunas de moeda para formatação no Excel (apenas para 'Relatorio')
         currency_cols_names_for_excel_fmt = [
             "ENERGIA (R$)",
             "COSIP (R$)",
@@ -683,92 +761,94 @@ class AppCelescReporter:
             "LÍQUIDO (R$)"
         ]
 
-        # --- Prepare dataframes for the final report ---
-        df_extracted_data = pd.DataFrame(all_extracted_data)
+        # --- Cria o DataFrame completo com todos os dados extraídos ---
+        df_full_data = pd.DataFrame(all_extracted_data)
 
-        # Ensure all expected columns exist and set order for extracted data
-        for col in final_columns_order_data:
-            if col not in df_extracted_data.columns:
-                 df_extracted_data[col] = pd.NA
-        df_extracted_data = df_extracted_data[final_columns_order_data]
+        # --- PREPARAR DADOS PARA A ABA 'CONTROLE' (SE SOLICITADO) ---
+        df_controle = pd.DataFrame()
+        if self.gerar_controle_var.get():
+            self.log_message("Preparando dados para a aba 'Controle'...", "INFO")
+            if not df_full_data.empty and not df_full_data[df_full_data['UC'].notna()].empty:
+                # Novas colunas e dicionário de agregação para a aba 'Controle'
+                new_controle_cols = [
+                    "Energia (1,2%)", "Retenção(1,2%)",
+                    "Energia (4,8%)", "Retenção(4,8%)"
+                ]
+                
+                # Garante que as novas colunas existam no dataframe antes de agrupar
+                for col in new_controle_cols:
+                    if col not in df_full_data.columns:
+                        df_full_data[col] = 0.0
+                
+                # Agrupa por UC, Centro de Custo e Subseção, e soma os valores
+                controle_agg_dict = {col: 'sum' for col in new_controle_cols}
+                
+                df_controle = df_full_data.groupby(['UC', 'Centro de Custo', 'Subseção'], as_index=False).agg(controle_agg_dict)
+                
+                # Reordena as colunas para o formato final especificado
+                final_controle_order = [
+                    'UC', 'Centro de Custo', 'Subseção',
+                    'Energia (1,2%)', 'Retenção(1,2%)',
+                    'Energia (4,8%)', 'Retenção(4,8%)'
+                ]
+                
+                # Filtra para garantir que apenas colunas existentes sejam usadas
+                df_controle = df_controle.reindex(columns=final_controle_order)
+            else:
+                self.log_message("AVISO: Nenhum dado extraído para gerar a aba 'Controle'.", "WARNING")
+        
+        # --- Prepara o DataFrame para a aba 'Relatorio' (apenas com as colunas originais) ---
+        df_extracted_data = pd.DataFrame()
+        if not df_full_data.empty:
+            df_extracted_data = df_full_data.reindex(columns=final_columns_order_data)
 
-        # Format currency columns for calculation
-        for col_name in currency_cols_names_for_excel_fmt:
-            if col_name in df_extracted_data.columns:
-                df_extracted_data[col_name] = pd.to_numeric(df_extracted_data[col_name], errors='coerce')
-                df_extracted_data[col_name] = df_extracted_data[col_name].fillna(0.0)
+            # Formata colunas de moeda para cálculo
+            for col_name in currency_cols_names_for_excel_fmt:
+                if col_name in df_extracted_data.columns:
+                    df_extracted_data[col_name] = pd.to_numeric(df_extracted_data[col_name], errors='coerce').fillna(0.0)
 
-        # --- Create TOTAL row for extracted data ---
+        # --- Create TOTAL row for extracted data ('Relatorio') ---
         df_total_row = pd.DataFrame() # Initialize empty
         if not df_extracted_data.empty:
-            total_row_data = {}
-            total_row_data["UC"] = "Totais" # Changed to "Totais" for clarity and comparison
+            total_row_data = {"UC": "Totais"}
             for col in final_columns_order_data:
-                if col not in currency_cols_names_for_excel_fmt and col != "UC":
-                    total_row_data[col] = ""
-                elif col in currency_cols_names_for_excel_fmt:
+                if col in currency_cols_names_for_excel_fmt:
                     total_row_data[col] = df_extracted_data[col].sum()
-            
-            df_total_row = pd.DataFrame([total_row_data])
-            df_total_row = df_total_row.reindex(columns=final_columns_order_data)
+                elif col != "UC":
+                    total_row_data[col] = ""
+            df_total_row = pd.DataFrame([total_row_data]).reindex(columns=final_columns_order_data)
 
         # --- Create Valor Cobrado summary row ---
         df_cobrado_summary_row = pd.DataFrame() # Initialize empty
         if all_valor_cobrado_results:
-            # Calculate sum from verified values
-            total_valor_cobrado_sum = sum([res.get("liquido_total_verified", 0.0) for res in all_valor_cobrado_results if res.get("liquido_total_verified") is not None])
+            total_valor_cobrado_sum = sum(res.get("liquido_total_verified", 0.0) for res in all_valor_cobrado_results if res.get("liquido_total_verified") is not None)
             
             cobrado_summary_row_data = {col: "" for col in final_columns_order_data}
-            cobrado_summary_row_data["UC"] = "TOTAL conta" # Distinct label
+            cobrado_summary_row_data["UC"] = "TOTAL conta"
             if "LÍQUIDO (R$)" in final_columns_order_data:
                 cobrado_summary_row_data["LÍQUIDO (R$)"] = total_valor_cobrado_sum
-            df_cobrado_summary_row = pd.DataFrame([cobrado_summary_row_data])
-            df_cobrado_summary_row = df_cobrado_summary_row.reindex(columns=final_columns_order_data)
+            df_cobrado_summary_row = pd.DataFrame([cobrado_summary_row_data]).reindex(columns=final_columns_order_data)
             self.log_message(f"Soma total de 'Valor Cobrado Verificado': {total_valor_cobrado_sum}", "INFO")
 
-        # --- Assemble the final report DataFrame with blank rows ---
+        # --- Assemble the final report DataFrame ('Relatorio') with blank rows ---
         final_report_parts = []
-
-        # Add Extracted Data
         if not df_extracted_data.empty:
             final_report_parts.append(df_extracted_data)
+            if not df_total_row.empty or not df_cobrado_summary_row.empty:
+                blank_row_df = pd.DataFrame([{col: "" for col in final_columns_order_data}])
+                final_report_parts.append(blank_row_df)
 
-        # Determine if any summary rows exist to potentially add a separator blank row
-        has_summary_rows = not df_total_row.empty or not df_cobrado_summary_row.empty
-        
-        # Add a blank row only if there are summary rows AND we actually have extracted data
-        # This blank row separates the main data from any summary rows below it.
-        if not df_extracted_data.empty and has_summary_rows:
-            blank_row_df = pd.DataFrame([{col: "" for col in final_columns_order_data}])
-            final_report_parts.append(blank_row_df)
-
-        # Add TOTAL row for extracted data
         if not df_total_row.empty:
             final_report_parts.append(df_total_row)
-
-        # Add Valor Cobrado Summary row (directly after Totais if it exists, no blank row in between)
-        # The previous logic for a blank row here was removed.
         if not df_cobrado_summary_row.empty:
             final_report_parts.append(df_cobrado_summary_row)
         
-        # Concatenate all parts into the final dataframe
-        if final_report_parts:
-            df_final_report = pd.concat(final_report_parts, ignore_index=True)
-        else:
-            df_final_report = pd.DataFrame(columns=final_columns_order_data) # Empty if no data extracted
-
+        df_final_report = pd.concat(final_report_parts, ignore_index=True) if final_report_parts else pd.DataFrame(columns=final_columns_order_data)
 
         # --- Process df_errors ---
         df_errors = pd.DataFrame()
         if error_items:
-            df_errors = pd.DataFrame(error_items)
-            for col in final_columns_order_errors:
-                 if col not in df_errors.columns:
-                    default_value = "" if col == "Observação" else (0.0 if col in currency_cols_names_for_excel_fmt else "N/A")
-                    df_errors[col] = default_value
-            df_errors = df_errors[final_columns_order_errors]
-        else:
-             df_errors = pd.DataFrame(columns=final_columns_order_errors)
+            df_errors = pd.DataFrame(error_items).reindex(columns=final_columns_order_errors)
 
         # --- Geração do nome do arquivo com data ---
         try:
@@ -792,12 +872,15 @@ class AppCelescReporter:
                     worksheet.freeze_panes = 'A2' # Congela a linha de cabeçalho
                     yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
                     
-                    # Alinhar à esquerda toda a coluna I (coluna 9) exceto o cabeçalho
-                    coluna_index = 9
-                    coluna_letra = get_column_letter(coluna_index)
-                    for row in range(2, worksheet.max_row + 1):  # começa da linha 2 para não afetar o cabeçalho
-                        cell = worksheet[f"{coluna_letra}{row}"]
-                        cell.alignment = Alignment(horizontal="right")
+                    # Alinhar à direita a coluna 'Numero da Pagina'
+                    try:
+                        col_index = final_columns_order_data.index("Numero da Pagina") + 1
+                        col_letter = get_column_letter(col_index)
+                        for row in range(2, worksheet.max_row + 1):
+                            cell = worksheet[f"{col_letter}{row}"]
+                            cell.alignment = Alignment(horizontal="right")
+                    except (ValueError, IndexError):
+                        pass # Ignora se a coluna não for encontrada
 
                     # Formata colunas de moeda e aplica destaque condicional
                     for col_name_df in currency_cols_names_for_excel_fmt:
@@ -805,52 +888,65 @@ class AppCelescReporter:
                             excel_col_idx = final_columns_order_data.index(col_name_df) + 1
                             col_letter = get_column_letter(excel_col_idx)
                             
-                            # Itera sobre todas as linhas (incluindo dados, totais, sumários e brancos)
                             for row_idx_in_final_df in range(df_final_report.shape[0]):
-                                row_excel_num = row_idx_in_final_df + 2 # Excel é 1-based, cabeçalho é linha 1
-                                
+                                row_excel_num = row_idx_in_final_df + 2 
                                 cell = worksheet[f'{col_letter}{row_excel_num}']
-                                if cell.value is not None and isinstance(cell.value, (int, float)):
+                                if isinstance(cell.value, (int, float)):
                                     cell.number_format = 'R$ #,##0.00'
-                                    # Aplica destaque amarelo se 'LÍQUIDO (R$)' for zero
-                                    if col_name_df == "LÍQUIDO (R$)" and cell.value == 0:
+                                    if cell.value == 0 and col_name_df in ["LÍQUIDO (R$)", "COSIP (R$)"]:
                                         cell.fill = yellow_fill
-                                    if col_name_df == "COSIP (R$)" and cell.value == 0:
-                                        cell.fill = yellow_fill
-                                # Ignora células vazias ou em linhas em branco para evitar erros de formatação
-                                elif cell.value is None or str(cell.value).strip() == "":
-                                     pass
 
                     # Ajusta largura das colunas
                     for col_idx_df, col_name_df in enumerate(final_columns_order_data):
                         excel_col_idx = col_idx_df + 1
                         column_letter_val = get_column_letter(excel_col_idx)
-                        max_len = 0
-                        header_cell_val = worksheet[f'{column_letter_val}1'].value
-                        if header_cell_val:
-                             max_len = len(str(header_cell_val))
+                        max_len = len(str(worksheet[f'{column_letter_val}1'].value))
                         
-                        # Verifica o comprimento máximo em todas as células da coluna
-                        for row_idx_in_final_df in range(df_final_report.shape[0]):
-                            row_excel_num = row_idx_in_final_df + 2
-                            cell = worksheet[f'{column_letter_val}{row_excel_num}']
-                            if cell.value is not None:
-                                cell_str_val = ""
-                                # Formata valores monetários para cálculo de comprimento, mantendo a estética
+                        for cell in worksheet[column_letter_val]:
+                            if cell.value:
+                                cell_str_val = str(cell.value)
                                 if col_name_df in currency_cols_names_for_excel_fmt and isinstance(cell.value, (int, float)):
-                                    formatted_value_for_len = f"{cell.value:_.2f}".replace('.',',').replace('_','.')
-                                    if cell.value < 0:
-                                         formatted_value_for_len = f"-{formatted_value_for_len}"
-                                    cell_str_val = formatted_value_for_len
-                                else:
-                                    cell_str_val = str(cell.value)
+                                    cell_str_val = f"R$ {cell.value:,.2f}"
                                 max_len = max(max_len, len(cell_str_val))
                         
                         adjusted_width = (max_len + 2) if max_len > 0 else 12
-                        # Define uma largura mínima razoável para a coluna UC
                         if col_name_df == "UC":
                              adjusted_width = max(adjusted_width, 15) 
                         worksheet.column_dimensions[column_letter_val].width = adjusted_width
+
+                # --- GRAVAR A ABA 'CONTROLE' (SE GERADA) ---
+                if not df_controle.empty:
+                    df_controle.to_excel(writer, index=False, sheet_name='Controle')
+                    worksheet_controle = writer.sheets['Controle']
+                    worksheet_controle.freeze_panes = 'A2'
+
+                    # Lista de colunas de moeda para a nova aba 'Controle'
+                    controle_currency_cols = [
+                        "Energia (1,2%)", "Retenção(1,2%)",
+                        "Energia (4,8%)", "Retenção(4,8%)"
+                    ]
+                    
+                    # Formatar colunas de moeda para a aba 'Controle'
+                    for col_idx, col_name in enumerate(df_controle.columns):
+                        if col_name in controle_currency_cols:
+                            col_letter = get_column_letter(col_idx + 1)
+                            for row_num in range(2, worksheet_controle.max_row + 1):
+                                cell = worksheet_controle[f'{col_letter}{row_num}']
+                                if isinstance(cell.value, (int, float)):
+                                    cell.number_format = 'R$ #,##0.00'
+
+                    # Ajustar largura das colunas para a aba 'Controle'
+                    for col_idx, col_name in enumerate(df_controle.columns):
+                        column_letter = get_column_letter(col_idx + 1)
+                        max_len = len(str(worksheet_controle[f'{column_letter}1'].value))
+                        for cell in worksheet_controle[column_letter]:
+                             if cell.value:
+                                cell_str = str(cell.value)
+                                if col_name in controle_currency_cols and isinstance(cell.value, (int, float)):
+                                    cell_str = f"R$ {cell.value:,.2f}"
+                                max_len = max(max_len, len(cell_str))
+                        adjusted_width = (max_len + 2) if max_len > 0 else 12
+                        worksheet_controle.column_dimensions[column_letter].width = adjusted_width
 
                 if not df_errors.empty:
                     df_errors.to_excel(writer, index=False, sheet_name='Relatorio_Erros')
@@ -860,55 +956,26 @@ class AppCelescReporter:
                         excel_col_idx = col_idx_df + 1
                         column_letter_val = get_column_letter(excel_col_idx)
                         max_len = len(str(worksheet_errors[f'{column_letter_val}1'].value))
-                        for row_num in range(2, worksheet_errors.max_row + 1):
-                             cell = worksheet_errors[f'{column_letter_val}{row_num}']
-                             if cell.value is not None:
+                        for cell in worksheet_errors[column_letter_val]:
+                             if cell.value:
                                 max_len = max(max_len, len(str(cell.value)))
                         adjusted_width = (max_len + 2) if max_len > 0 else 12
                         if col_name_df == "Observação":
                             adjusted_width = min(adjusted_width, 80) # Limita a largura da coluna de observação
                         worksheet_errors.column_dimensions[column_letter_val].width = adjusted_width
             
-            # --- NEW: Perform the value comparison and apply highlight ---
-            # This section compares the 'Totais' row (calculated sum) with the 'TOTAL conta' row (from Valor Cobrado).
-            
-            calculated_total_liquido = 0.0
-            account_total_liquido = 0.0
+            # --- Perform the value comparison and apply highlight ---
+            calculated_total_liquido = df_total_row['LÍQUIDO (R$)'].iloc[0] if not df_total_row.empty else 0.0
+            account_total_liquido = df_cobrado_summary_row['LÍQUIDO (R$)'].iloc[0] if not df_cobrado_summary_row.empty else 0.0
 
-            # Get the sum from the 'Totais' row in df_final_report
-            if not df_total_row.empty and 'LÍQUIDO (R$)' in df_total_row.columns:
-                total_row_val = df_total_row['LÍQUIDO (R$)'].iloc[0]
-                if pd.notna(total_row_val):
-                    calculated_total_liquido = float(total_row_val)
-                else:
-                    self.log_message("AVISO: Valor 'Totais' na coluna 'LÍQUIDO (R$)' é nulo.", "WARNING")
-            else:
-                self.log_message("AVISO: Linha 'Totais' não gerada ou não contém 'LÍQUIDO (R$)' para comparação.", "WARNING")
-
-            # Get the value from the 'TOTAL conta' row (which is df_cobrado_summary_row)
-            if not df_cobrado_summary_row.empty and 'LÍQUIDO (R$)' in df_cobrado_summary_row.columns:
-                cobrado_row_val = df_cobrado_summary_row['LÍQUIDO (R$)'].iloc[0]
-                if pd.notna(cobrado_row_val):
-                    account_total_liquido = float(cobrado_row_val)
-                else:
-                    self.log_message("AVISO: Valor 'TOTAL conta' na coluna 'LÍQUIDO (R$)' é nulo.", "WARNING")
-            else:
-                self.log_message("AVISO: Linha 'TOTAL conta' não gerada ou não contém 'LÍQUIDO (R$)' para comparação.", "WARNING")
-
-            # Compare the values using a small tolerance for floating point safety
-            # The user requested exact difference, but float comparison might need tolerance.
-            # Using a small tolerance `1e-9` to account for potential floating point inaccuracies.
             if abs(calculated_total_liquido - account_total_liquido) > 1e-9:
-                self.account_values_mismatched = True # Set the flag for mismatch
+                self.account_values_mismatched = True
                 self.log_message("Valores da conta não conferem! (Total Extraído vs Total da Fatura)", "WARNING")
 
-                # Apply highlighting in Excel if worksheet is available
                 if worksheet is not None:
                     totais_row_index_in_sheet = -1
-                    # Find the row in the worksheet that contains "Totais" in the first column ('UC')
-                    for r_idx in range(2, worksheet.max_row + 1): # Start from row 2 (after header)
-                        cell_value = worksheet[f'A{r_idx}'].value # Assuming 'UC' is column A
-                        if cell_value == "Totais": # Corrected to match the string used for df_total_row
+                    for r_idx in range(2, worksheet.max_row + 1):
+                        if worksheet[f'A{r_idx}'].value == "Totais":
                             totais_row_index_in_sheet = r_idx
                             break
 
@@ -918,111 +985,86 @@ class AppCelescReporter:
                             excel_col_idx_highlight = final_columns_order_data.index(col_name_to_highlight) + 1
                             col_letter_highlight = get_column_letter(excel_col_idx_highlight)
                             
-                            cell_to_highlight = worksheet[f'{col_letter_highlight}{totais_row_index_in_sheet}']
-                            cell_to_highlight.fill = yellow_fill # Use the already defined yellow_fill
+                            worksheet[f'{col_letter_highlight}{totais_row_index_in_sheet}'].fill = yellow_fill
                             self.log_message(f"Célula {col_letter_highlight}{totais_row_index_in_sheet} (Totais, LÍQUIDO) destacada em amarelo.", "INFO")
                     else:
                         self.log_message("AVISO: Não foi possível localizar a linha 'Totais' para destacar o valor.", "WARNING")
-                else:
-                    self.log_message("AVISO: Worksheet 'Relatorio' não disponível para aplicar destaque.", "WARNING")
 
             # --- Determine Final Status and Messages ---
-            # This logic block decides the final message and popup type, prioritizing the mismatch.
-            
             final_status_message = ""
             final_messagebox_title = ""
             final_messagebox_type = messagebox.showinfo
-            summary_message = "" # This will be used in the messagebox content
+            summary_message = ""
 
             if self.account_values_mismatched:
-                # If mismatch occurred, it has the highest priority for status and message.
                 final_status_message = "Concluído: Valores da conta não conferem!"
                 final_messagebox_title = "Alerta Crítico: Discrepância nos Valores!"
-                summary_message = f"ATENÇÃO: Os valores totais calculados e os valores informados na conta não conferem.\n" \
-                                  f"Verifique a linha 'Totais' na aba 'Relatorio' (destacada em amarelo).\n" \
-                                  f"Total Calculado: R$ {calculated_total_liquido:,.2f}\n" \
-                                  f"Total da Fatura: R$ {account_total_liquido:,.2f}\n\n"
+                summary_message = (f"ATENÇÃO: Os valores totais calculados e os valores informados na conta não conferem.\n"
+                                   f"Verifique a linha 'Totais' na aba 'Relatorio' (destacada em amarelo).\n"
+                                   f"Total Calculado: R$ {calculated_total_liquido:,.2f}\n"
+                                   f"Total da Fatura: R$ {account_total_liquido:,.2f}\n\n")
                 final_messagebox_type = messagebox.showwarning
-                # Ensure the overall severity reflects this critical issue if no other errors exist.
-                if self.current_severity < 1: # If current severity is INFO/SUCCESS (0)
-                    self.current_severity = 1 # Set to WARNING (1)
-
-            elif self.current_severity == 2: # Existing CRITICAL_ERRORs / ERRORs
+                if self.current_severity < 1:
+                    self.current_severity = 1
+            elif self.current_severity == 2:
                 final_status_message = "Concluído com ERROS."
                 final_messagebox_title = "Processamento Concluído com Alertas"
                 summary_message = f"Processamento concluído com ERROS!\n"
                 if not df_extracted_data.empty:
                     summary_message += f"{len(df_extracted_data)} registros de fatura extraídos com sucesso na aba 'Relatorio'.\n"
-                summary_message += f"{len(df_errors)} problemas/erros encontrados durante o processamento, listados na aba 'Relatorio_Erros'."
+                summary_message += f"{len(df_errors)} problemas/erros encontrados na aba 'Relatorio_Erros'."
                 final_messagebox_type = messagebox.showerror
-
-            elif self.has_specific_warnings: # Existing WARNINGs (but no Errors and no mismatch)
+            elif self.has_specific_warnings:
                 final_status_message = "Concluído com Avisos!"
                 final_messagebox_title = "Processamento Concluído com Avisos"
                 summary_message = f"Processamento concluído com Avisos!\n"
                 if not df_extracted_data.empty:
-                    summary_message += f"{len(df_extracted_data)} registros de fatura extraídos com sucesso na aba 'Relatorio'.\n"
+                    summary_message += f"{len(df_extracted_data)} registros de fatura extraídos na aba 'Relatorio'.\n"
                 final_messagebox_type = messagebox.showwarning
-
-            elif df_final_report.empty: # No mismatch, no errors, no warnings, and no data extracted
+            elif df_final_report.empty:
                 final_status_message = "Concluído (Sem dados extraídos)."
                 final_messagebox_title = "Processamento Concluído"
-                summary_message = f"Processamento concluído. Nenhum dado de fatura válido foi extraído.\n" \
-                                  f"Verifique se selecionou PDFs e se eles contêm faturas individuais com UCs identificáveis (além da página de sumário)."
+                summary_message = ("Processamento concluído. Nenhum dado de fatura válido foi extraído.\n"
+                                   "Verifique se os PDFs contêm faturas com UCs identificáveis.")
                 final_messagebox_type = messagebox.showinfo
-
-            else: # Success case: no mismatch, no errors, no warnings
+            else:
                 final_status_message = "Concluído com sucesso!"
                 final_messagebox_title = "Processamento Concluído"
                 summary_message = f"Processamento concluído com sucesso!\n{len(df_extracted_data)} registros de fatura extraídos na aba 'Relatorio'."
                 final_messagebox_type = messagebox.showinfo
             
-            # Update the progress bar style based on the overall determined severity
             final_progress_bar_style = "Success.Horizontal.TProgressbar"
-            if self.current_severity == 1: # Warning or mismatch
+            if self.current_severity == 1:
                 final_progress_bar_style = "Warning.Horizontal.TProgressbar"
-            elif self.current_severity == 2: # Errors or Critical Errors
+            elif self.current_severity == 2:
                 final_progress_bar_style = "Error.Horizontal.TProgressbar"
-            self.set_progress_bar_style(final_progress_bar_style) # Apply style
+            self.set_progress_bar_style(final_progress_bar_style)
 
-            # Update the status label on the GUI
             self.status_label.config(text=final_status_message)
 
-            # Display the messagebox to the user
             if output_file_path:
-                try:
-                    # Append the file path to the summary message for the user
-                    final_summary_msg_for_box = summary_message + f"\nRelatório salvo em:\n{output_file_path}"
-                    final_messagebox_type(final_messagebox_title, final_summary_msg_for_box)
-                except Exception as msg_e:
-                    self.log_message(f"Erro ao exibir messagebox: {msg_e}", "ERROR")
+                final_summary_msg_for_box = summary_message + f"\nRelatório salvo em:\n{output_file_path}"
+                final_messagebox_type(final_messagebox_title, final_summary_msg_for_box)
 
         except Exception as e:
             self.log_message(f"Erro CRÍTICO ao salvar o relatório Excel: {e}", "CRITICAL_ERROR")
             messagebox.showerror("Erro ao Salvar", f"Não foi possível salvar o relatório: {e}")
             self.status_label.config(text="Erro ao salvar relatório.")
         finally:
-            # Re-enable the process button regardless of success or failure
             self.process_button.config(state=tk.NORMAL)
             
-            # --- Debugging for spreadsheet opening ---
             if os.path.exists(output_file_path):
                 try:
-                    print(f"DEBUG_FILE_OPEN: Attempting to open file: {output_file_path}") # Debugging print
                     if sys.platform == "win32":
                         os.startfile(output_file_path)
                     elif sys.platform == "darwin":
                         subprocess.call(("open", output_file_path))
                     else:
                         subprocess.call(("xdg-open", output_file_path))
-                    print(f"DEBUG_FILE_OPEN: File opening command executed for: {output_file_path}") # Debugging print
                 except Exception as open_e:
                     self.log_message(f"Não foi possível abrir o relatório automaticamente: {open_e}", "WARNING")
-                    print(f"DEBUG_FILE_OPEN: Exception during file opening: {open_e}") # Debugging print
             else:
                 self.log_message(f"AVISO: Arquivo de relatório não encontrado para abrir: {output_file_path}", "WARNING")
-                print(f"DEBUG_FILE_OPEN: File not found at: {output_file_path}") # Debugging print
-            # --- End Debugging ---
 
 
     # --- FUNÇÃO ADICIONADA: Extrair e Verificar Valor Cobrado ---
