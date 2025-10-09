@@ -429,7 +429,7 @@ class AppCelescReporter:
         separator_canvas.create_line(0, 0, 0, 15, fill="gray")
         separator_canvas.pack(side=tk.LEFT, padx=(5, 5))
 
-        txt_check = ttk.Checkbutton(params_frame, text="Gerar TXT", variable=self.gerar_txt_var)
+        txt_check = ttk.Checkbutton(params_frame, text="Gerar TXT", variable=self.gerar_txt_var, command=self.on_toggle_gerar_txt)
         txt_check.pack(side=tk.LEFT, padx=5, pady=2)
 
         # Separador vertical entre opções
@@ -593,6 +593,15 @@ class AppCelescReporter:
             self.pdf_label.config(text="Nenhum PDF selecionado")
             self.log_message("Nenhum PDF selecionado.", "INFO")
             self.pdf_files = []
+
+    def on_toggle_gerar_txt(self):
+        """
+        Garante que, se 'Gerar TXT' for marcado, 'Gerar Controle' também seja.
+        Esta lógica só é ativada ao marcar a caixa, não ao desmarcar.
+        """
+        if self.gerar_txt_var.get(): # Se o checkbox 'Gerar TXT' está agora marcado
+            if not self.gerar_controle_var.get(): # E o checkbox 'Gerar Controle' não está marcado
+                self.gerar_controle_var.set(True) # Marca o 'Gerar Controle'
 
     def select_output_dir(self):
         """Permite ao usuário selecionar a pasta de saída para o relatório."""
