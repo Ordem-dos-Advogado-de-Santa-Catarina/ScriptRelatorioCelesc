@@ -327,7 +327,7 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback):
 class AppCelescReporter:
     def __init__(self, root_window):
         self.root = root_window
-        self.root.title("Gerador de Relatório Celesc - ver 1.1")
+        self.root.title("Gerador de Relatório Celesc - ver 1.2a")
         self.center_window(700, 650)
         self.root.resizable(False, False)
 
@@ -794,6 +794,30 @@ class AppCelescReporter:
                 
                 # Filtra para garantir que apenas colunas existentes sejam usadas
                 df_controle = df_controle.reindex(columns=final_controle_order)
+
+                # Adiciona a linha de totais à aba 'Controle'
+                if not df_controle.empty:
+                    # Calcula as somas das colunas D, E, F, G
+                    soma_d = df_controle['Energia (1,2%)'].sum()
+                    soma_e = df_controle['Retenção(1,2%)'].sum()
+                    soma_f = df_controle['Energia (4,8%)'].sum()
+                    soma_g = df_controle['Retenção(4,8%)'].sum()
+
+                    # Cria a linha em branco e a linha de totais
+                    linha_em_branco = pd.DataFrame([ {col: '' for col in df_controle.columns} ])
+                    linha_totais = pd.DataFrame([{
+                        'UC': 'Totais:',
+                        'Centro de Custo': '',
+                        'Subseção': '',
+                        'Energia (1,2%)': soma_d,
+                        'Retenção(1,2%)': soma_e,
+                        'Energia (4,8%)': soma_f,
+                        'Retenção(4,8%)': soma_g
+                    }])
+
+                    # Concatena o DataFrame original com as novas linhas
+                    df_controle = pd.concat([df_controle, linha_em_branco, linha_totais], ignore_index=True)
+
             else:
                 self.log_message("AVISO: Nenhum dado extraído para gerar a aba 'Controle'.", "WARNING")
         
@@ -810,7 +834,7 @@ class AppCelescReporter:
         # --- Create TOTAL row for extracted data ('Relatorio') ---
         df_total_row = pd.DataFrame() # Initialize empty
         if not df_extracted_data.empty:
-            total_row_data = {"UC": "Totais"}
+            total_row_data = {"UC": "Totais:"}
             for col in final_columns_order_data:
                 if col in currency_cols_names_for_excel_fmt:
                     total_row_data[col] = df_extracted_data[col].sum()
@@ -824,7 +848,7 @@ class AppCelescReporter:
             total_valor_cobrado_sum = sum(res.get("liquido_total_verified", 0.0) for res in all_valor_cobrado_results if res.get("liquido_total_verified") is not None)
             
             cobrado_summary_row_data = {col: "" for col in final_columns_order_data}
-            cobrado_summary_row_data["UC"] = "TOTAL conta"
+            cobrado_summary_row_data["UC"] = "TOTAL conta:"
             if "LÍQUIDO (R$)" in final_columns_order_data:
                 cobrado_summary_row_data["LÍQUIDO (R$)"] = total_valor_cobrado_sum
             df_cobrado_summary_row = pd.DataFrame([cobrado_summary_row_data]).reindex(columns=final_columns_order_data)
