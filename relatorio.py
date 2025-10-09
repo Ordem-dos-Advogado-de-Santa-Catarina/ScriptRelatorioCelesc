@@ -780,11 +780,17 @@ class AppCelescReporter:
                     if col not in df_full_data.columns:
                         df_full_data[col] = 0.0
                 
-                # Agrupa por UC, Centro de Custo e Subseção, e soma os valores
-                controle_agg_dict = {col: 'sum' for col in new_controle_cols}
-                controle_agg_dict['COSIP (R$)'] = 'sum'
-                
-                df_controle = df_full_data.groupby(['UC', 'Centro de Custo', 'Subseção'], as_index=False).agg(controle_agg_dict)
+                # Dicionário de agregação para agrupar por Centro de Custo e Subseção
+                controle_agg_dict = {
+                    'UC': lambda x: '\n'.join(sorted(x.astype(str).unique())), # Concatena UCs
+                    'COSIP (R$)': 'sum'
+                }
+                # Adiciona as outras colunas numéricas para soma
+                for col in new_controle_cols:
+                    controle_agg_dict[col] = 'sum'
+
+                # Agrupa por Centro de Custo e Subseção, somando valores e concatenando UCs
+                df_controle = df_full_data.groupby(['Centro de Custo', 'Subseção'], as_index=False).agg(controle_agg_dict)
                 
                 # Reordena as colunas para o formato final especificado
                 final_controle_order = [
@@ -955,25 +961,36 @@ class AppCelescReporter:
                         "Energia (4,8%)", "Retenção(4,8%)"
                     ]
                     
-                    # Formatar colunas de moeda para a aba 'Controle'
+                    # Formatar colunas para a aba 'Controle'
                     for col_idx, col_name in enumerate(df_controle.columns):
-                        if col_name in controle_currency_cols:
-                            col_letter = get_column_letter(col_idx + 1)
-                            for row_num in range(2, worksheet_controle.max_row + 1):
-                                cell = worksheet_controle[f'{col_letter}{row_num}']
-                                if isinstance(cell.value, (int, float)):
-                                    cell.number_format = 'R$ #,##0.00'
+                        col_letter = get_column_letter(col_idx + 1)
+                        for row_num in range(2, worksheet_controle.max_row + 1):
+                            cell = worksheet_controle[f'{col_letter}{row_num}']
+                            if col_idx == 0: worksheet_controle.row_dimensions[row_num].height = 15
+                            # Formata colunas de moeda
+                            if col_name in controle_currency_cols and isinstance(cell.value, (int, float)):
+                                cell.number_format = 'R$ #,##0.00'
+                            # Aplica quebra de linha na coluna UC
+                            if col_name == 'UC' and cell.value and isinstance(cell.value, str) and '\n' in cell.value:
+                                cell.alignment = Alignment(wrap_text=True, vertical='top')
 
                     # Ajustar largura das colunas para a aba 'Controle'
                     for col_idx, col_name in enumerate(df_controle.columns):
                         column_letter = get_column_letter(col_idx + 1)
                         max_len = len(str(worksheet_controle[f'{column_letter}1'].value))
                         for cell in worksheet_controle[column_letter]:
-                             if cell.value:
+                            if cell.value:
                                 cell_str = str(cell.value)
-                                if col_name in controle_currency_cols and isinstance(cell.value, (int, float)):
-                                    cell_str = f"R$ {cell.value:,.2f}"
-                                max_len = max(max_len, len(cell_str))
+                                if col_name == 'UC':
+                                    # Para a coluna UC, a largura é baseada na linha mais longa (UC mais longa)
+                                    lines = cell_str.split('\n')
+                                    current_max_line_len = max(len(line) for line in lines) if lines else 0
+                                    max_len = max(max_len, current_max_line_len)
+                                else:
+                                    # Para outras colunas, usa o comprimento total da string
+                                    if col_name in controle_currency_cols and isinstance(cell.value, (int, float)):
+                                        cell_str = f"R$ {cell.value:,.2f}"
+                                    max_len = max(max_len, len(cell_str))
                         adjusted_width = (max_len + 2) if max_len > 0 else 12
                         worksheet_controle.column_dimensions[column_letter].width = adjusted_width
 
