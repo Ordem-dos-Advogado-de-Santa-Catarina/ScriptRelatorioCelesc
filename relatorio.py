@@ -325,13 +325,45 @@ class AppCelescReporter:
 
         self.load_base_sheet() # Carrega a planilha base ao iniciar
 
-        # --- 2. Arquivos PDF das Faturas ---
-        pdf_frame = ttk.LabelFrame(main_frame, text="Arquivos PDF das Faturas", padding="10")
-        pdf_frame.pack(fill=tk.X, pady=5)
+        # --- 2. Container para PDF e Parâmetros ---
+        pdf_params_container_frame = ttk.Frame(main_frame)
+        pdf_params_container_frame.pack(fill=tk.X, pady=5)
+
+        # --- 2.1 Arquivos PDF das Faturas (Esquerda) ---
+        pdf_frame = ttk.LabelFrame(pdf_params_container_frame, text="Arquivos PDF das Faturas", padding="10")
+        pdf_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
         self.pdf_button = ttk.Button(pdf_frame, text="Selecionar PDFs da Celesc", command=self.select_pdfs)
         self.pdf_button.pack(side=tk.LEFT, padx=(0,10))
         self.pdf_label = ttk.Label(pdf_frame, text="Nenhum PDF selecionado")
         self.pdf_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # --- 2.2 Parâmetros (Direita) ---
+        params_frame = ttk.LabelFrame(pdf_params_container_frame, text="Parâmetros", padding="10")
+        params_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+
+        self.gerar_cvc_var = tk.BooleanVar()
+        self.gerar_txt_var = tk.BooleanVar()
+        self.gerar_xlsx_var = tk.BooleanVar(value=True)
+
+        cvc_check = ttk.Checkbutton(params_frame, text="Gerar CVC", variable=self.gerar_cvc_var)
+        cvc_check.pack(side=tk.LEFT, padx=5, pady=2)
+
+        # Separador vertical entre opções
+        separator_canvas = Canvas(params_frame, width=1, height=15, bg=self.theme_background_color, highlightthickness=0)
+        separator_canvas.create_line(0, 0, 0, 15, fill="gray")
+        separator_canvas.pack(side=tk.LEFT, padx=(5, 5))
+
+        txt_check = ttk.Checkbutton(params_frame, text="Gerar TXT", variable=self.gerar_txt_var)
+        txt_check.pack(side=tk.LEFT, padx=5, pady=2)
+
+        # Separador vertical entre opções
+        separator_canvas_1 = Canvas(params_frame, width=1, height=15, bg=self.theme_background_color, highlightthickness=0)
+        separator_canvas_1.create_line(0, 0, 0, 15, fill="gray")
+        separator_canvas_1.pack(side=tk.LEFT, padx=(5, 5))
+
+        self.xlsx_checkbox = ttk.Checkbutton(params_frame, text="Gerar XLSX", variable=self.gerar_xlsx_var, state=tk.DISABLED)
+        self.xlsx_checkbox.pack(side=tk.LEFT, padx=5, pady=2)
 
         # --- 3. Pasta de Saída do Relatório ---
         output_frame = ttk.LabelFrame(main_frame, text="Pasta de Saída do Relatório", padding="10")
