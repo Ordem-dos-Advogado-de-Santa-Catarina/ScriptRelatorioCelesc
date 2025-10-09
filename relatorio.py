@@ -342,12 +342,12 @@ class AppCelescReporter:
         params_frame = ttk.LabelFrame(pdf_params_container_frame, text="Parâmetros", padding="10")
         params_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
 
-        self.gerar_cvc_var = tk.BooleanVar()
+        self.gerar_controle_var = tk.BooleanVar()
         self.gerar_txt_var = tk.BooleanVar()
-        self.gerar_xlsx_var = tk.BooleanVar(value=True)
+        self.gerar_relatorio_var = tk.BooleanVar(value=True)
 
-        cvc_check = ttk.Checkbutton(params_frame, text="Gerar CVC", variable=self.gerar_cvc_var)
-        cvc_check.pack(side=tk.LEFT, padx=5, pady=2)
+        controle_check = ttk.Checkbutton(params_frame, text="Gerar Controle", variable=self.gerar_controle_var)
+        controle_check.pack(side=tk.LEFT, padx=1, pady=2)
 
         # Separador vertical entre opções
         separator_canvas = Canvas(params_frame, width=1, height=15, bg=self.theme_background_color, highlightthickness=0)
@@ -362,8 +362,8 @@ class AppCelescReporter:
         separator_canvas_1.create_line(0, 0, 0, 15, fill="gray")
         separator_canvas_1.pack(side=tk.LEFT, padx=(5, 5))
 
-        self.xlsx_checkbox = ttk.Checkbutton(params_frame, text="Gerar XLSX", variable=self.gerar_xlsx_var, state=tk.DISABLED)
-        self.xlsx_checkbox.pack(side=tk.LEFT, padx=5, pady=2)
+        self.relatorio_checkbox = ttk.Checkbutton(params_frame, text="Gerar Relatorio", variable=self.gerar_relatorio_var, state=tk.DISABLED)
+        self.relatorio_checkbox.pack(side=tk.LEFT, padx=5, pady=2)
 
         # --- 3. Pasta de Saída do Relatório ---
         output_frame = ttk.LabelFrame(main_frame, text="Pasta de Saída do Relatório", padding="10")
@@ -786,9 +786,9 @@ class AppCelescReporter:
             with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
                 worksheet = None # Initialize worksheet variable
                 if not df_final_report.empty:
-                    df_final_report.to_excel(writer, index=False, sheet_name='Relatorio_Dados_Extraidos')
+                    df_final_report.to_excel(writer, index=False, sheet_name='Relatorio')
                     workbook = writer.book
-                    worksheet = writer.sheets['Relatorio_Dados_Extraidos'] # Get worksheet here
+                    worksheet = writer.sheets['Relatorio'] # Get worksheet here
                     worksheet.freeze_panes = 'A2' # Congela a linha de cabeçalho
                     yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
                     
@@ -924,7 +924,7 @@ class AppCelescReporter:
                     else:
                         self.log_message("AVISO: Não foi possível localizar a linha 'Totais' para destacar o valor.", "WARNING")
                 else:
-                    self.log_message("AVISO: Worksheet 'Relatorio_Dados_Extraidos' não disponível para aplicar destaque.", "WARNING")
+                    self.log_message("AVISO: Worksheet 'Relatorio' não disponível para aplicar destaque.", "WARNING")
 
             # --- Determine Final Status and Messages ---
             # This logic block decides the final message and popup type, prioritizing the mismatch.
@@ -939,7 +939,7 @@ class AppCelescReporter:
                 final_status_message = "Concluído: Valores da conta não conferem!"
                 final_messagebox_title = "Alerta Crítico: Discrepância nos Valores!"
                 summary_message = f"ATENÇÃO: Os valores totais calculados e os valores informados na conta não conferem.\n" \
-                                  f"Verifique a linha 'Totais' na aba 'Relatorio_Dados_Extraidos' (destacada em amarelo).\n" \
+                                  f"Verifique a linha 'Totais' na aba 'Relatorio' (destacada em amarelo).\n" \
                                   f"Total Calculado: R$ {calculated_total_liquido:,.2f}\n" \
                                   f"Total da Fatura: R$ {account_total_liquido:,.2f}\n\n"
                 final_messagebox_type = messagebox.showwarning
@@ -952,7 +952,7 @@ class AppCelescReporter:
                 final_messagebox_title = "Processamento Concluído com Alertas"
                 summary_message = f"Processamento concluído com ERROS!\n"
                 if not df_extracted_data.empty:
-                    summary_message += f"{len(df_extracted_data)} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
+                    summary_message += f"{len(df_extracted_data)} registros de fatura extraídos com sucesso na aba 'Relatorio'.\n"
                 summary_message += f"{len(df_errors)} problemas/erros encontrados durante o processamento, listados na aba 'Relatorio_Erros'."
                 final_messagebox_type = messagebox.showerror
 
@@ -961,7 +961,7 @@ class AppCelescReporter:
                 final_messagebox_title = "Processamento Concluído com Avisos"
                 summary_message = f"Processamento concluído com Avisos!\n"
                 if not df_extracted_data.empty:
-                    summary_message += f"{len(df_extracted_data)} registros de fatura extraídos com sucesso na aba 'Relatorio_Dados_Extraidos'.\n"
+                    summary_message += f"{len(df_extracted_data)} registros de fatura extraídos com sucesso na aba 'Relatorio'.\n"
                 final_messagebox_type = messagebox.showwarning
 
             elif df_final_report.empty: # No mismatch, no errors, no warnings, and no data extracted
@@ -974,7 +974,7 @@ class AppCelescReporter:
             else: # Success case: no mismatch, no errors, no warnings
                 final_status_message = "Concluído com sucesso!"
                 final_messagebox_title = "Processamento Concluído"
-                summary_message = f"Processamento concluído com sucesso!\n{len(df_extracted_data)} registros de fatura extraídos na aba 'Relatorio_Dados_Extraidos'."
+                summary_message = f"Processamento concluído com sucesso!\n{len(df_extracted_data)} registros de fatura extraídos na aba 'Relatorio'."
                 final_messagebox_type = messagebox.showinfo
             
             # Update the progress bar style based on the overall determined severity
