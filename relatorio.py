@@ -782,12 +782,14 @@ class AppCelescReporter:
                 
                 # Agrupa por UC, Centro de Custo e Subseção, e soma os valores
                 controle_agg_dict = {col: 'sum' for col in new_controle_cols}
+                controle_agg_dict['COSIP (R$)'] = 'sum'
                 
                 df_controle = df_full_data.groupby(['UC', 'Centro de Custo', 'Subseção'], as_index=False).agg(controle_agg_dict)
                 
                 # Reordena as colunas para o formato final especificado
                 final_controle_order = [
                     'UC', 'Centro de Custo', 'Subseção',
+                    'COSIP (R$)',
                     'Energia (1,2%)', 'Retenção(1,2%)',
                     'Energia (4,8%)', 'Retenção(4,8%)'
                 ]
@@ -797,7 +799,8 @@ class AppCelescReporter:
 
                 # Adiciona a linha de totais à aba 'Controle'
                 if not df_controle.empty:
-                    # Calcula as somas das colunas D, E, F, G
+                    # Calcula as somas das colunas
+                    soma_cosip = df_controle['COSIP (R$)'].sum()
                     soma_d = df_controle['Energia (1,2%)'].sum()
                     soma_e = df_controle['Retenção(1,2%)'].sum()
                     soma_f = df_controle['Energia (4,8%)'].sum()
@@ -809,6 +812,7 @@ class AppCelescReporter:
                         'UC': 'Totais:',
                         'Centro de Custo': '',
                         'Subseção': '',
+                        'COSIP (R$)': soma_cosip,
                         'Energia (1,2%)': soma_d,
                         'Retenção(1,2%)': soma_e,
                         'Energia (4,8%)': soma_f,
@@ -946,6 +950,7 @@ class AppCelescReporter:
 
                     # Lista de colunas de moeda para a nova aba 'Controle'
                     controle_currency_cols = [
+                        "COSIP (R$)",
                         "Energia (1,2%)", "Retenção(1,2%)",
                         "Energia (4,8%)", "Retenção(4,8%)"
                     ]
