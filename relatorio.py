@@ -1137,7 +1137,7 @@ class AppCelescReporter:
         status_messages = []
 
         try:
-            # 1️⃣ Abrir o PDF e acessar a primeira página
+            # 1 Abrir o PDF e acessar a primeira página
             doc = fitz.open(pdf_path)
             if doc.page_count == 0:
                 doc.close()
@@ -1147,22 +1147,22 @@ class AppCelescReporter:
             text = page.get_text("text") # Extrai todo o texto da primeira página
             doc.close() # Fecha o documento
 
-            # 3️⃣ Procurar o rótulo "Valor Cobrado (R$)"
+            # 2 Procurar o rótulo "Valor Cobrado (R$)"
             match_label_cobrado = re.search(r"Valor Cobrado \(R\$\)", text, re.IGNORECASE)
 
             if match_label_cobrado:
-                # 4️⃣ Definir uma área de busca restrita após o rótulo
+                # 3 Definir uma área de busca restrita após o rótulo
                 search_start = match_label_cobrado.end()
                 # Limita a busca aos próximos 150 caracteres após o rótulo (ajustável)
                 search_end = min(search_start + 150, len(text))
                 search_text_area = text[search_start:search_end]
 
-                # 5️⃣ Extrair o(s) valor(es) numérico(s) da área de busca
+                # 4 Extrair o(s) valor(es) numérico(s) da área de busca
                 potential_values = re.findall(r"([\d.,]+)", search_text_area)
 
                 if potential_values:
-                    # 6️⃣ Limpar e converter as strings de valores para números reais
-                    # 7️⃣ Pegar o primeiro valor numérico encontrado
+                    # 5 Limpar e converter as strings de valores para números reais
+                    # 6 Pegar o primeiro valor numérico encontrado
                     for val_str in potential_values:
                         cleaned_val = self.clean_currency(val_str)
                         if cleaned_val is not None:
@@ -1178,14 +1178,14 @@ class AppCelescReporter:
             else:
                 status_messages.append("Aviso: Rótulo 'Valor Cobrado (R$)' não encontrado na primeira página.")
 
-            # 8️⃣ Verificar a duplicação na primeira página
+            # 7 Verificar a duplicação na primeira página
             if valor_cobrado is not None and valor_cobrado_str_original is not None:
                 # Busca TODAS as ocorrências da STRING original do valor cobrado no texto COMPLETO da primeira página
                 all_occurrences = list(re.finditer(re.escape(valor_cobrado_str_original), text))
 
                 # Conta as ocorrências
                 if len(all_occurrences) >= 2: # Se o valor aparece 2 vezes ou mais
-                    # 9️⃣ Salvar o resultado: Se duplicado
+                    # 9 Salvar o resultado: Se duplicado
                     liquido_total = valor_cobrado # Confirma o valor que será somado
                     status_messages.append(f"Sucesso: Valor '{valor_cobrado_str_original}' encontrado {len(all_occurrences)} vezes na página.")
                 else:
@@ -1199,7 +1199,6 @@ class AppCelescReporter:
             # Captura qualquer erro inesperado durante o processamento
             status_messages.append(f"Erro inesperado durante a extração/verificação: {e}")
             return None, None, None, status_messages
-    # --- FIM DA FUNÇÃO ADICIONADA ---
 
     def show_info(self):
         """
