@@ -421,8 +421,8 @@ class AppCelescReporter:
         self.gerar_txt_var = tk.BooleanVar()
         self.gerar_relatorio_var = tk.BooleanVar(value=True)
 
-        controle_check = ttk.Checkbutton(params_frame, text="Gerar Controle", variable=self.gerar_controle_var)
-        controle_check.pack(side=tk.LEFT, padx=1, pady=2)
+        self.controle_check = ttk.Checkbutton(params_frame, text="Gerar Controle", variable=self.gerar_controle_var)
+        self.controle_check.pack(side=tk.LEFT, padx=1, pady=2)
 
         # Separador vertical entre opções
         separator_canvas = Canvas(params_frame, width=1, height=15, bg=self.theme_background_color, highlightthickness=0)
@@ -596,12 +596,15 @@ class AppCelescReporter:
 
     def on_toggle_gerar_txt(self):
         """
-        Garante que, se 'Gerar TXT' for marcado, 'Gerar Controle' também seja.
-        Esta lógica só é ativada ao marcar a caixa, não ao desmarcar.
+        Controla o estado da checkbox 'Gerar Controle' com base na 'Gerar TXT'.
+        Se 'Gerar TXT' for marcado, 'Gerar Controle' é marcado e desativado.
+        Se 'Gerar TXT' for desmarcado, 'Gerar Controle' é reativado.
         """
-        if self.gerar_txt_var.get(): # Se o checkbox 'Gerar TXT' está agora marcado
-            if not self.gerar_controle_var.get(): # E o checkbox 'Gerar Controle' não está marcado
-                self.gerar_controle_var.set(True) # Marca o 'Gerar Controle'
+        if self.gerar_txt_var.get():  # Se o checkbox 'Gerar TXT' está agora marcado
+            self.gerar_controle_var.set(True)  # Marca o 'Gerar Controle'
+            self.controle_check.config(state=tk.DISABLED)  # Desativa a interação
+        else:  # Se o checkbox 'Gerar TXT' foi desmarcado
+            self.controle_check.config(state=tk.NORMAL)  # Reativa a interação
 
     def select_output_dir(self):
         """Permite ao usuário selecionar a pasta de saída para o relatório."""
