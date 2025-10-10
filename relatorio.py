@@ -355,9 +355,9 @@ class AppCelescReporter:
 
         self.current_severity = 0
         self.SEVERITY_MAP = {
-            "INFO": 0, "DEBUG": 0, "SUCCESS": 0,
-            "WARNING": 1,
-            "ERROR": 2, "CRITICAL_ERROR": 2
+            "INFO": 0, "DEBUG": 0, "SUCCESSO": 0,
+            "AVISO": 1,
+            "ERRO": 2, "ERRO_CRITICO!": 2
         }
 
         self.has_specific_warnings = False # Flag para avisos específicos (para o resumo final)
@@ -392,10 +392,10 @@ class AppCelescReporter:
         self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, height=10, state=tk.DISABLED)
         self.log_text.pack(fill=tk.BOTH, expand=True)
         self.log_text.tag_config("INFO", foreground="black")
-        self.log_text.tag_config("WARNING", foreground="orange")
-        self.log_text.tag_config("ERROR", foreground="red")
-        self.log_text.tag_config("CRITICAL_ERROR", foreground="red", font=('TkDefaultFont', 9, 'bold'))
-        self.log_text.tag_config("SUCCESS", foreground="green")
+        self.log_text.tag_config("AVISO", foreground="orange")
+        self.log_text.tag_config("ERRO", foreground="red")
+        self.log_text.tag_config("ERRO_CRITICO", foreground="red", font=('TkDefaultFont', 9, 'bold'))
+        self.log_text.tag_config("SUCCESSO", foreground="green")
         self.log_text.tag_config("DEBUG", foreground="gray")
 
         self.load_base_sheet() # Carrega a planilha base ao iniciar
@@ -773,6 +773,16 @@ class AppCelescReporter:
         # --- Cria o DataFrame completo com todos os dados extraídos ---
         df_full_data = pd.DataFrame(all_extracted_data)
 
+        # --- Geração do nome do arquivo com data ---
+        try:
+            today_str = datetime.today().strftime("%d.%m.%Y")
+            output_filename = f"{today_str} Repasse-Celesc.xlsx"
+            output_file_path = os.path.join(self.output_dir, output_filename)
+            self.log_message(f"Nome do arquivo de saída gerado: {output_filename}", "INFO")
+        except Exception as e:
+            self.log_message(f"Erro ao gerar nome do arquivo de saída: {e}. Usando nome padrão.", "WARNING")
+            output_file_path = os.path.join(self.output_dir, "Relatorio_Celesc.xlsx")
+
         # --- PREPARAR DADOS PARA A ABA 'CONTROLE' (SE SOLICITADO) ---
         df_controle = pd.DataFrame()
         if self.gerar_controle_var.get():
@@ -814,6 +824,56 @@ class AppCelescReporter:
 
                 # Adiciona a linha de totais à aba 'Controle'
                 if not df_controle.empty:
+                    # --- INÍCIO DA MODIFICAÇÃO: Geração dos arquivos TXT ---
+                    if self.gerar_txt_var.get():
+                        try:
+                            self.log_message("Iniciando geração de arquivos TXT...", "INFO")
+                            # Cria a pasta de saída para os TXTs com base no nome do Excel
+                            txt_folder_name = os.path.splitext(output_filename)[0]
+                            txt_output_dir = os.path.join(self.output_dir, txt_folder_name)
+                            os.makedirs(txt_output_dir, exist_ok=True)
+                            self.log_message(f"Pasta para arquivos TXT criada em: {txt_output_dir}", "INFO")
+                    
+                            # Mapeamento de nome de arquivo para coluna de dados
+                            txt_map = {
+                                "Rateio Cosip.txt": "COSIP (R$)",
+                                "Rateio Energia 1.2.txt": "Energia (1,2%)",
+                                "Rateio Energia 4.8.txt": "Energia (4,8%)"
+                            }
+                    
+                            # Itera sobre o mapa para gerar cada arquivo TXT
+                            for filename, data_column in txt_map.items():
+                                txt_file_path = os.path.join(txt_output_dir, filename)
+                                lines_to_write = []
+                    
+                                # Itera sobre as linhas do DataFrame 'Controle' (antes de adicionar totais)
+                                for index, row in df_controle.iterrows():
+                                    centro_custo = row['Centro de Custo']
+                                    value = row[data_column]
+                    
+                                    # Processa apenas se o valor não for nulo e for maior que zero
+                                    if pd.notna(value) and abs(value) > 1e-9:
+                                        # Formatação do valor numérico
+                                        formatted_value = f"{value:.2f}".replace('.', ',')
+                                        if formatted_value.endswith(",00"):
+                                            formatted_value = formatted_value[:-3]
+                                        
+                                        if pd.notna(centro_custo) and str(centro_custo).strip():
+                                            lines_to_write.append(f"{centro_custo}#SEP#{formatted_value}")
+                                
+                                # Escreve as linhas no arquivo
+                                if lines_to_write:
+                                    with open(txt_file_path, 'w', encoding='utf-8') as f:
+                                        f.write('\n'.join(lines_to_write))
+                                    self.log_message(f"Arquivo '{filename}' gerado com {len(lines_to_write)} linhas.", "SUCCESSO")
+                                else:
+                                    self.log_message(f"Nenhum dado válido para gerar o arquivo '{filename}'.", "INFO")
+                        
+                        except Exception as e:
+                            self.log_message(f"Erro CRÍTICO ao gerar arquivos TXT: {e}", "ERRO_CRITICO")
+                            messagebox.showerror("Erro na Geração de TXT", f"Ocorreu um erro ao gerar os arquivos TXT: {e}")
+                    # --- FIM DA MODIFICAÇÃO ---
+
                     # Calcula as somas das colunas
                     soma_cosip = df_controle['COSIP (R$)'].sum()
                     soma_d = df_controle['Energia (1,2%)'].sum()
@@ -892,16 +952,6 @@ class AppCelescReporter:
         df_errors = pd.DataFrame()
         if error_items:
             df_errors = pd.DataFrame(error_items).reindex(columns=final_columns_order_errors)
-
-        # --- Geração do nome do arquivo com data ---
-        try:
-            today_str = datetime.today().strftime("%d.%m.%Y")
-            output_filename = f"{today_str} Repasse-Celesc.xlsx"
-            output_file_path = os.path.join(self.output_dir, output_filename)
-            self.log_message(f"Nome do arquivo de saída gerado: {output_filename}", "INFO")
-        except Exception as e:
-            self.log_message(f"Erro ao gerar nome do arquivo de saída: {e}. Usando nome padrão.", "WARNING")
-            output_file_path = os.path.join(self.output_dir, "Relatorio_Celesc.xlsx")
 
         # --- Save and open the Excel file ---
         try:
