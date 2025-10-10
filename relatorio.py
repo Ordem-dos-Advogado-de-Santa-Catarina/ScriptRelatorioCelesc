@@ -327,7 +327,7 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback):
 class AppCelescReporter:
     def __init__(self, root_window):
         self.root = root_window
-        self.root.title("Gerador de Relatório Celesc - ver 1.2a")
+        self.root.title("Gerador de Relatório Celesc - ver 1.2.1a")
         self.center_window(700, 650)
         self.root.resizable(False, False)
 
