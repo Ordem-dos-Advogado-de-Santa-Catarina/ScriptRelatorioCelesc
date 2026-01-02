@@ -1,88 +1,49 @@
-# 💾 Gerador de Relatório de Faturas Celesc
+# Gerador de Relatório de Faturas Celesc
 
-Este projeto é uma aplicação em Python com interface gráfica (GUI) que permite extrair dados de faturas da Celesc em formato PDF e gerar um relatório consolidado em Excel. É especialmente útil para empresas ou usuários que precisam auditar, conferir ou organizar informações de múltiplas contas de energia.
+Aplicação desktop desenvolvida em Python para automação de processos de auditoria de contas de energia. O sistema extrai dados de faturas da Celesc (PDF), cruza informações com uma base de dados interna e gera um relatório consolidado em Excel contendo valores líquidos, brutos e retenções tributárias.
 
-## 📎 Funcionalidades
+## Funcionalidades
 
-- 📄 Processa vários arquivos PDF de faturas da Celesc.
-- 🔍 Faz a leitura dos dados:
-  - Unidade Consumidora (UC)
-  - Código de Registro
-  - Nome (da base de dados)
-  - Valor Líquido da Fatura
-  - Desconto de Tributos Retidos (IRPJ, PIS, COFINS, CSLL)
-  - Valor Bruto calculado (Líquido + Descontos)
-- ⚙️ Verifica se os dados da fatura estão cadastrados na planilha base (`base/ucs.sub.xlsx`).
-- 📤 Gera relatório Excel com:
-  - Aba de dados extraídos (`Relatorio_Dados_Extraidos`)
-  - Aba de erros/problemas encontrados (`Relatorio_Erros`)
-- ✅ Interface intuitiva e fácil de usar.
-- 🔔 Log em tempo real durante o processamento.
+- **Extração em Lote:** Processamento de múltiplos arquivos PDF simultaneamente.
+- **Captura de Dados:** Leitura de Unidade Consumidora (UC), valores monetários e impostos retidos (IRPJ, PIS, COFINS, CSLL).
+- **Validação de Base:** Verificação automática da existência da UC na planilha de controle (`database.xlsx`).
+- **Cálculo Reverso:** Geração do Valor Bruto com base no Líquido + Descontos.
+- **Relatório de Erros:** Aba dedicada no Excel para apontar faturas ilegíveis ou UCs não cadastradas.
+- **Interface Gráfica:** GUI com logs de processamento em tempo real.
 
----
+## Estrutura de Arquivos Necessária
 
-# 📖 Manual de Uso - Gerador de Relatórios CELESC
+Para que o executável funcione corretamente, a seguinte estrutura de pastas deve ser mantida:
 
-## ⚙️ Configuração da Planilha Base
+```text
+📂 Pasta do Projeto
+├── 📄 Relatorio.exe
+└── 📂 base
+    └── 📄 database.xlsx
+```
 
-O programa utiliza uma planilha de referência (`database.xlsx`) que deve estar na pasta:
+## Configuração da Base de Dados
 
-"/base/database.xlsx"
+O arquivo `database.xlsx` (localizado dentro da pasta `base`) é obrigatório. Ele serve como referência para cruzar o número da UC com o centro de custo e o nome da unidade.
 
-### 🗂️ Estrutura obrigatória da planilha:
+**Estrutura obrigatória das colunas:**
 
-| UC        | Cod de Reg | Nome    |
-| ----------|------------|---------|
-| (Número)  | (Código)   | (Cidade)|
+| UC | Cod de Reg | Nome |
+| :--- | :--- | :--- |
+| (Número da UC) | (Código do Centro de Custo) | (Cidade/Unidade) |
 
-- **UC:** Número da Unidade Consumidora (**com todos os zeros à esquerda, sem pontos, barras ou traços**).
-- **Cod de Reg:** Código do centro de custo, departamento ou setor.
-- **Nome:** Nome da cidade ou unidade correspondente.
+**Importante:**
+1. A coluna `UC` deve conter apenas números (sem pontos ou traços).
+2. Os nomes dos cabeçalhos devem ser exatamente: **UC**, **Cod de Reg**, **Nome**.
 
-> ⚠️ **Importante:** As colunas devem ter exatamente estes nomes: `UC`, `Cod de Reg`, `Nome`.  
-> A falta de qualquer uma delas impedirá a execução do programa.
+## Como Utilizar
 
----
-
-## 💻 Como Executar o Programa
-
-Após gerar o `.exe`, siga estes passos:
-
-### 1. Abrir o Programa
-Execute o arquivo `Relatorio.exe`.
-
-### 2. Verificar a Planilha Base
-**A planilha `database.xlsx` deve estar na pasta `base`.  
-O executável `Relatorio.exe` deve estar na mesma pasta que a pasta `base`.**
-
-Verifique no campo de status se foi carregada com sucesso.
-
-### 3. Selecionar os PDFs
-- Clique em **"Selecionar PDFs da Celesc"**.
-- Selecione os arquivos PDF contendo as faturas que você deseja processar.
-
-### 4. Definir Pasta de Saída
-- Clique em **"Definir Pasta de Saída"**.
-- Escolha onde deseja salvar o relatório Excel gerado.
-
-### 5. Iniciar Processamento
-- Clique em **"Iniciar Processamento de Relatório"**.
-- Acompanhe o progresso na barra e no log em tempo real.
-
-### 6. Finalização
-- Ao final, o arquivo **`Relatorio_Celesc.xlsx`** será salvo na pasta de saída escolhida.
-- O relatório será aberto automaticamente (se possível).
-
----
-
-## 🛠️ Tecnologias Utilizadas
-
-- Python
-- Tkinter (interface gráfica)
-- Pandas
-- pdfplumber
-- openpyxl (para manipulação avançada do Excel)
-- Regex para extração de dados
-
-
-
+1. Certifique-se de que o arquivo `database.xlsx` está atualizado na pasta `base`.
+2. Execute o arquivo `Relatorio.exe`.
+3. Na interface:
+   - Clique em **Selecionar PDFs** e escolha os arquivos de fatura.
+   - Clique em **Definir Pasta de Saída** para escolher onde salvar o Excel final.
+   - Clique em **Iniciar Processamento**.
+4. O sistema irá gerar o arquivo `Relatorio_Celesc.xlsx` contendo 2 ou 3 abas dependendo das opções marcadas:
+   - `Relatorio_Dados_Extraidos`: Dados processados com sucesso.
+   - `Relatorio_Erros`: Arquivos que falharam ou UCs não encontradas na base.
