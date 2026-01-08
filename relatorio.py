@@ -243,6 +243,38 @@ def extract_fatura_data_from_text_block(text_block, df_base, pdf_filename_for_er
 
     # Extrai e adiciona os novos dados EXCLUSIVAMENTE para a aba de Controle
     controle_data = extract_new_controle_data(text_block)
+
+    # --- INÍCIO DA CORREÇÃO: NORMALIZAÇÃO DE VALORES ---
+    # Força os dados do Controle a baterem com os dados do Relatório (que é a 'Verdade' do boleto)
+    
+    # 1. Ajuste de ENERGIA
+    # Calcula a diferença entre o que foi achado no Controle e o valor "Oficial" de Energia do Relatório
+    soma_energia_controle = controle_data["Energia (1,2%)"] + controle_data["Energia (4,8%)"]
+    diff_energia = valor_energia_calculado - soma_energia_controle
+
+    # Se houver diferença significativa (maior que meio centavo), ajusta
+    if abs(diff_energia) > 0.005:
+        # Adiciona a diferença à categoria que tiver maior valor absoluto
+        # Isso evita distorções grandes e assume que multas/juros pertencem à maior fatia de consumo
+        if abs(controle_data["Energia (4,8%)"]) >= abs(controle_data["Energia (1,2%)"]):
+            controle_data["Energia (4,8%)"] += diff_energia
+        else:
+            controle_data["Energia (1,2%)"] += diff_energia
+
+    # 2. Ajuste de RETENÇÃO
+    # Calcula a diferença entre a retenção achada no Controle e a retenção total do Relatório
+    soma_retencao_controle = controle_data["Retenção(1,2%)"] + controle_data["Retenção(4,8%)"]
+    diff_retencao = retencao_tributos - soma_retencao_controle
+
+    if abs(diff_retencao) > 0.005:
+        # Mesma lógica: ajusta onde o valor é maior
+        if abs(controle_data["Retenção(4,8%)"]) >= abs(controle_data["Retenção(1,2%)"]):
+            controle_data["Retenção(4,8%)"] += diff_retencao
+        else:
+            controle_data["Retenção(1,2%)"] += diff_retencao
+    
+    # --- FIM DA CORREÇÃO ---
+
     fatura_data.update(controle_data)
 
     return fatura_data
@@ -327,7 +359,7 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback):
 class AppCelescReporter:
     def __init__(self, root_window):
         self.root = root_window
-        self.root.title("Gerador de Relatório Celesc - ver 1.2.1a")
+        self.root.title("Gerador de Relatório Celesc - ver 1.2.3a")
         self.center_window(700, 650)
         self.root.resizable(False, False)
 
