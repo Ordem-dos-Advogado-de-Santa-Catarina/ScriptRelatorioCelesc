@@ -51,9 +51,9 @@ def parse_value(value_str):
 
 def extract_uc_from_block(text_block):
     """Extrai o número da Unidade Consumidora (UC) do bloco de texto."""
-    match = re.search(r"(?:UC:|Unidade Consumidora:)\s*(\d+)", text_block)
+    match = re.search(r"(?:UC:|Unidade Consumidora:)\s*([\d\.-]+)", text_block)
     if match:
-        return match.group(1)
+        return match.group(1).replace('.', '').replace('-', '')
     return None
 
 def extract_valor_total_fatura_from_block(text_block):
@@ -307,7 +307,7 @@ def process_pdf_file(pdf_path, df_base, logger_func, progress_callback):
                         progress_callback(1)
                     continue
 
-                uc_pattern = r"(?:UC:|Unidade Consumidora:)\s*\d+"
+                uc_pattern = r"(?:UC:|Unidade Consumidora:)\s*[\d\.-]+"
                 matches = list(re.finditer(uc_pattern, page_text))
 
                 if not matches:
